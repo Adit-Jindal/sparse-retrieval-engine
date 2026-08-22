@@ -1,59 +1,190 @@
 """
-submission/boolean_vsm.py — Boolean retrieval + vector-space ranking.
+submission/boolean_vsm.py
 
-Required component (assignment Section 4.1): "supports conjunctive/
-disjunctive Boolean queries and a cosine-similarity vector-space ranking
-with a TF-IDF weighting scheme of your choice."
-
-Two independent pieces to implement:
-
-1. Boolean retrieval: given a query, treat it as an AND (conjunctive) or
-   OR (disjunctive) combination of terms and return the matching document
-   set — no ranking, just set membership. Useful as a fast candidate
-   filter and as a sanity check ("does my index even find the right
-   documents for this query?").
-
-2. Vector-space ranking: represent the query and each candidate document
-   as TF-IDF weighted vectors and rank by cosine similarity. A standard
-   TF-IDF weight for term t in document d:
-
-       w(t, d) = tf(t, d) * log( N / df(t) )
-
-   (log base is your choice — just be consistent), and cosine similarity
-   between query vector q and document vector d:
-
-       sim(q, d) = (q . d) / (||q|| * ||d||)
-
-Both pieces should read from the same InvertedIndex you build in
-indexer.py.
+Boolean retrieval and TF-IDF cosine vector-space ranking.
 """
-from typing import List, Tuple
 
-from submission.indexer import InvertedIndex
+import math
+from typing import Dict, List, Tuple, Optional
+
+from submission.indexer import InvertedIndex, tokenize
+
+
+_INDEX: Optional[InvertedIndex] = None
+
+# doc_id -> Euclidean norm of its TF-IDF vector
+_DOC_NORMS: Dict[str, float] = {}
 
 
 def build(index: InvertedIndex) -> None:
-    """Optional: precompute anything VSM-specific (e.g. document vector
-    norms) from the InvertedIndex built in indexer.py.
+    """
+    Precompute document TF-IDF vector norms.
+    """
 
-    Call this from retrieve.load_index(), not retrieve.build_index() —
-    the harness runs those two in separate processes, so any cache this
-    creates only needs to exist in the process that also calls
-    retrieve(). If you want a precomputed cache to persist across the
-    build/load boundary too, write it out via InvertedIndex.save() instead
-    (it then counts toward your index-size score) and rebuild the cache
-    here from the loaded index."""
-    raise NotImplementedError
+    global _INDEX, _DOC_NORMS
+
+    _INDEX = index
+    _DOC_NORMS = {}
+
+    for term, postings in index.postings.items():
+        df = len(postings)
+
+        if df == 0 or index.N == 0:
+            continue
+
+        idf = math.log(index.N / df)
+
+        for doc_id, tf in postings.items():
+            weight = tf * idf
+
+            old_norm_sq = _DOC_NORMS.get(doc_id, 0.0)
+            _DOC_NORMS[doc_id] = old_norm_sq + weight * weight
+
+    # Convert squared norms to actual norms.
+    for doc_id in list(_DOC_NORMS.keys()):
+        _DOC_NORMS[doc_id] = math.sqrt(_DOC_NORMS[doc_id])
 
 
 def boolean_search(query: str, mode: str = "and") -> List[str]:
-    """Return the (unranked) list of doc_ids matching `query`, treating it
-    as a conjunction (`mode="and"`) or disjunction (`mode="or"`) of its
-    terms."""
-    raise NotImplementedError
+    """
+    Return document IDs matching the query using AND or OR semantics.
+    """
+
+    if _INDEX is None:
+        raise RuntimeError(
+            "boolean_vsm.build() must be called before searching."
+        )
+
+    if mode not in {"and", "or"}:
+        raise ValueError("mode must be either 'and' or 'or'")
+
+    terms = tokenize(query)
+
+    if not terms:
+        return []
+
+    # Remove duplicate query terms.
+    terms = list(dict.fromkeys(terms))
+
+    postings_sets = []
+
+    for term in terms:
+        postings = _INDEX.postings.get(term)
+
+        if postings is None:
+            if mode == "and":
+                return []
+            continue
+
+        postings_sets.append(set(postings.keys()))
+
+    if not postings_sets:
+        return []
+
+    if mode == "and":
+        result = postings_sets[0].copy()
+
+        for docs in postings_sets[1:]:
+            result.intersection_update(docs)
+
+    else:
+        result = set()
+
+        for docs in postings_sets:
+            result.update(docs)
+
+    return sorted(result)
 
 
 def vsm_score(query: str, k: int) -> List[Tuple[str, float]]:
-    """Return up to k (doc_id, score) pairs for `query`, ranked by
-    TF-IDF cosine similarity, highest score first."""
-    raise NotImplementedError
+    """
+    Rank documents using TF-IDF cosine similarity.
+    """
+
+    if _INDEX is None:
+        raise RuntimeError(
+            "boolean_vsm.build() must be called before vsm_score()."
+        )
+
+    if k <= 0:
+        return []
+
+    tokens = tokenize(query)
+
+    if not tokens:
+        return []
+
+    # Query term frequencies.
+    query_tf: Dict[str, int] = {}
+
+    for term in tokens:
+        query_tf[term] = query_tf.get(term, 0) + 1
+
+    # Build query TF-IDF weights.
+    query_weights: Dict[str, float] = {}
+
+    for term, tf in query_tf.items():
+        df = _INDEX.document_frequency(term)
+
+        if df == 0:
+            continue
+
+        idf = math.log(_INDEX.N / df)
+
+        query_weights[term] = tf * idf
+
+    if not query_weights:
+        return []
+
+    query_norm = math.sqrt(
+        sum(weight * weight for weight in query_weights.values())
+    )
+
+    if query_norm == 0.0:
+        return []
+
+    # Candidate documents are the union of the query terms' postings.
+    candidates = set()
+
+    for term in query_weights:
+        postings = _INDEX.postings.get(term)
+
+        if postings:
+            candidates.update(postings.keys())
+
+    scores: Dict[str, float] = {}
+
+    for doc_id in candidates:
+        dot_product = 0.0
+
+        for term, query_weight in query_weights.items():
+            postings = _INDEX.postings.get(term)
+
+            if not postings:
+                continue
+
+            tf = postings.get(doc_id)
+
+            if tf is None:
+                continue
+
+            df = _INDEX.document_frequency(term)
+            idf = math.log(_INDEX.N / df)
+
+            doc_weight = tf * idf
+
+            dot_product += query_weight * doc_weight
+
+        doc_norm = _DOC_NORMS.get(doc_id, 0.0)
+
+        if doc_norm == 0.0:
+            continue
+
+        scores[doc_id] = dot_product / (query_norm * doc_norm)
+
+    ranked = sorted(
+        scores.items(),
+        key=lambda item: (-item[1], item[0])
+    )
+
+    return ranked[:k]

@@ -26,6 +26,8 @@ directly (smaller, relative to the class median, scores better), so a
 compact postings encoding is worth more here than in most course
 assignments — see the `save()` docstring for concrete starting points.
 """
+import os
+import pickle
 import re
 from typing import Dict, List, Tuple
 
@@ -54,18 +56,47 @@ class InvertedIndex:
     def build(self, corpus: List[Tuple[str, str]]) -> None:
         """corpus: list of (doc_id, text) pairs, e.g. from
         submission.corpus_utils.load_corpus().
-
-        TODO(you): tokenize each document, populate self.postings,
-        self.doc_len, self.doc_text, self.N, and self.avg_doc_len.
         """
-        raise NotImplementedError("Implement InvertedIndex.build() — see assignment Section 4.1.")
+
+        self.postings = {}
+        self.doc_len = {}
+        self.doc_text = {}
+
+        for doc_id, text in corpus:
+            tokens = tokenize(text)
+
+            self.doc_len[doc_id] = len(tokens)
+            self.doc_text[doc_id] = text
+
+            term_counts: Dict[str, int] = {}
+
+            for term in tokens:
+                term_counts[term] = term_counts.get(term, 0) + 1
+
+            for term, tf in term_counts.items():
+                if term not in self.postings:
+                    self.postings[term] = {}
+
+                self.postings[term][doc_id] = tf
+
+        self.N = len(self.doc_len)
+
+        if self.N > 0:
+            self.avg_doc_len = sum(self.doc_len.values()) / self.N
+        else:
+            self.avg_doc_len = 0.0
+
 
     def document_frequency(self, term: str) -> int:
         """Number of documents containing `term` at least once.
 
         TODO(you): implement using self.postings.
         """
-        raise NotImplementedError("Implement InvertedIndex.document_frequency().")
+        postings = self.postings.get(term)
+        if postings is None:
+            return 0
+
+        return len(postings)
 
     def save(self, index_dir: str) -> None:
         """Persist everything document_frequency() / your scorers need to
@@ -84,17 +115,43 @@ class InvertedIndex:
           - delta-encode each postings list's doc-ids (sorted ascending,
             store gaps instead of absolute ids) and varint/byte-pack them,
             instead of a naive JSON list of integers.
-
-        TODO(you): implement.
         """
-        raise NotImplementedError("Implement InvertedIndex.save() — see assignment Section 4.1.")
+
+        os.makedirs(index_dir, exist_ok=True)
+
+        data = {
+            "postings": self.postings,
+            "doc_len": self.doc_len,
+            "N": self.N,
+            "avg_doc_len": self.avg_doc_len,
+        } # Currently does not save the raw text for current implementation does not use that
+
+        path = os.path.join(index_dir, "index.pkl")
+
+        with open(path, "wb") as f:
+            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+
 
     @classmethod
     def load(cls, index_dir: str) -> "InvertedIndex":
         """Reconstruct an InvertedIndex purely from what save() wrote to
         `index_dir`. Called in a fresh process — do not rely on any state
         other than what's actually on disk in `index_dir`.
-
-        TODO(you): implement, matching whatever format save() wrote.
         """
-        raise NotImplementedError("Implement InvertedIndex.load() — see assignment Section 4.1.")
+
+        path = os.path.join(index_dir, "index.pkl")
+
+        with open(path, "rb") as f:
+            data = pickle.load(f)
+
+        index = cls()
+
+        index.postings = data["postings"]
+        index.doc_len = data["doc_len"]
+        index.N = data["N"]
+        index.avg_doc_len = data["avg_doc_len"]
+
+        # Raw text isn't needed by the naive retrieval system.
+        index.doc_text = {}
+
+        return index

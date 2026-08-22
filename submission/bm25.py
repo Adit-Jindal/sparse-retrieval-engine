@@ -27,9 +27,13 @@ controls document-length normalisation strength. Both must be exposed as
 parameters, not hard-coded — you need to sweep them for your report
 (assignment Section 8, "parameter search procedure for k1, b").
 """
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Optional
+import math
 
-from submission.indexer import InvertedIndex
+from submission.indexer import InvertedIndex, tokenize
+
+_INDEX: Optional[InvertedIndex] = None
+_IDF: Dict[str, float] = {}
 
 
 def build(index: InvertedIndex) -> None:
@@ -43,10 +47,81 @@ def build(index: InvertedIndex) -> None:
     build/load boundary too, write it out via InvertedIndex.save() instead
     (it then counts toward your index-size score) and rebuild the cache
     here from the loaded index."""
-    raise NotImplementedError
+    global _INDEX, _IDF
+
+    _INDEX = index
+    _IDF = {}
+
+    for term, postings in index.postings.items():
+        df = len(postings)
+
+        # +1-smoothed Robertson/Sparck Jones IDF.
+        idf = math.log(
+            ((index.N - df + 0.5) / (df + 0.5)) + 1.0
+        )
+
+        _IDF[term] = idf
 
 
 def score(query: str, k: int, k1: float = 1.2, b: float = 0.75) -> List[Tuple[str, float]]:
     """Return up to k (doc_id, score) pairs for `query`, BM25-ranked,
     highest score first."""
-    raise NotImplementedError
+    if _INDEX is None:
+        raise RuntimeError("bm25.build() must be called before bm25.score().")
+
+    if k <= 0:
+        return []
+
+    tokens = tokenize(query)
+
+    # BM25's scoring formula is term-based. Using unique query terms
+    # avoids accidentally counting the same query term multiple times.
+    query_terms = set(tokens)
+
+    scores: Dict[str, float] = {}
+
+    avgdl = _INDEX.avg_doc_len
+
+    if avgdl <= 0:
+        return []
+
+    for term in query_terms:
+        postings = _INDEX.postings.get(term)
+
+        # Unknown query term.
+        if not postings:
+            continue
+
+        idf = _IDF.get(term)
+
+        if idf is None:
+            continue
+
+        for doc_id, tf in postings.items():
+            doc_length = _INDEX.doc_len[doc_id]
+
+            denominator = (
+                tf
+                + k1 * (
+                    1.0
+                    - b
+                    + b * (doc_length / avgdl)
+                )
+            )
+
+            contribution = (
+                idf
+                * (tf * (k1 + 1.0))
+                / denominator
+            )
+
+            scores[doc_id] = scores.get(doc_id, 0.0) + contribution
+
+    # Deterministic tie-breaking by doc_id.
+    ranked = sorted(
+        scores.items(),
+        key=lambda item: (-item[1], item[0])
+    )
+
+    return ranked[:k]
+

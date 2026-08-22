@@ -46,6 +46,8 @@ import os
 from typing import List, Optional, Tuple
 
 from submission.corpus_utils import load_corpus
+from submission.indexer import InvertedIndex
+from submission import bm25, boolean_vsm
 
 # TODO(you): once implemented, import and use your real scorers, e.g.:
 # from submission import bm25, boolean_vsm, custom_scorer
@@ -63,6 +65,8 @@ _DOC_ORDER: Optional[List[str]] = None  # [doc_id, ...] in the order build_index
 _DOC_ORDER_FILENAME = "doc_order.json"  # TODO(you): replace with your real index files
 
 
+_INDEX: Optional[InvertedIndex] = None
+
 def build_index(corpus_path: str, index_dir: str) -> None:
     """Load the corpus, build whatever index structures you need, and
     write everything retrieve() will need into `index_dir`.
@@ -79,16 +83,16 @@ def build_index(corpus_path: str, index_dir: str) -> None:
     # TODO(you): build your real inverted index / term statistics here, e.g.:
     #
     #   from submission.indexer import InvertedIndex
-    #   index = InvertedIndex()
-    #   index.build(corpus)
-    #   index.save(index_dir)          # <- persist it (see indexer.py)
+    index = InvertedIndex()
+    index.build(corpus)
+    index.save(index_dir)          # <- persist it (see indexer.py)
     #
     # The trivial baseline below only persists doc_id order, which is all
     # `_baseline_retrieve` needs.
-    os.makedirs(index_dir, exist_ok=True)
-    doc_order = [doc_id for doc_id, _text in corpus]
-    with open(os.path.join(index_dir, _DOC_ORDER_FILENAME), "w", encoding="utf-8") as f:
-        json.dump(doc_order, f)
+    # os.makedirs(index_dir, exist_ok=True)
+    # doc_order = [doc_id for doc_id, _text in corpus]
+    # with open(os.path.join(index_dir, _DOC_ORDER_FILENAME), "w", encoding="utf-8") as f:
+    #     json.dump(doc_order, f)
 
 
 def load_index(index_dir: str) -> None:
@@ -97,34 +101,47 @@ def load_index(index_dir: str) -> None:
     calls — there is no leftover state from build_index() to rely on.
     """
     global _DOC_ORDER
+    global _INDEX
+
 
     # TODO(you): load your real index here, e.g.:
     #
-    #   from submission.indexer import InvertedIndex
-    #   index = InvertedIndex.load(index_dir)
-    #   bm25.build(index)
-    #   boolean_vsm.build(index)
+    from submission.indexer import InvertedIndex
+    _INDEX = InvertedIndex.load(index_dir)
+    bm25.build(_INDEX)
+    boolean_vsm.build(_INDEX)
     #
     # and store it in a module-level variable so retrieve() can use it.
-    path = os.path.join(index_dir, _DOC_ORDER_FILENAME)
-    with open(path, encoding="utf-8") as f:
-        _DOC_ORDER = json.load(f)
+    # path = os.path.join(index_dir, _DOC_ORDER_FILENAME)
+    # with open(path, encoding="utf-8") as f:
+    #     _DOC_ORDER = json.load(f)
 
 
 def retrieve(query: str, k: int = 10) -> List[Tuple[str, float]]:
     """Return up to k (doc_id, score) pairs for `query`, best first."""
-    if _DOC_ORDER is None:
+    # if _DOC_ORDER is None:
+    #     raise RuntimeError(
+    #         "retrieve() called before load_index(); the harness always "
+    #         "calls build_index(corpus_path, index_dir) and then "
+    #         "load_index(index_dir) — in that order, in two separate "
+    #         "processes — before any retrieve() calls. If you're testing "
+    #         "manually, do the same."
+    #     )
+
+    if _INDEX is None:
         raise RuntimeError(
-            "retrieve() called before load_index(); the harness always "
-            "calls build_index(corpus_path, index_dir) and then "
-            "load_index(index_dir) — in that order, in two separate "
-            "processes — before any retrieve() calls. If you're testing "
-            "manually, do the same."
+            "retrieve() called before load_index()."
         )
+
+    return bm25.score(
+        query, k,
+        k1=1.2,
+        b=0.75,
+    )
 
     # TODO(you): replace this with a real scorer, e.g.:
     #   return bm25.score(query, k, k1=1.2, b=0.75)
-    return _baseline_retrieve(query, k)
+    # return _baseline_retrieve(query, k)
 
 
 # ---------------------------------------------------------------------------
