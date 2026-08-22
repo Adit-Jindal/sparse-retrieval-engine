@@ -4,7 +4,7 @@ This is the starter repository for **Assignment 1: Sparse Retrieval
 Arena**. If anything here conflicts with the assignment spec document,
 the spec document governs the rules (grading, deadlines, integrity); this
 repo governs the exact code interface, which the spec explicitly defers
-to it for ("exact signature given in the starter repo").
+to it for ("exact signature given in the starter repo https://github.com/col7364iitd/2026-a1-student ").
 
 ## What you're building
 

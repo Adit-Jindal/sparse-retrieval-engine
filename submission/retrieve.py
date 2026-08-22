@@ -133,6 +133,10 @@ def retrieve(query: str, k: int = 10) -> List[Tuple[str, float]]:
             "retrieve() called before load_index()."
         )
 
+    # return boolean_vsm.vsm_score(
+    #     query, k
+    # )
+
     return bm25.score(
         query, k,
         k1=1.2,
