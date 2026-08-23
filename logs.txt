@@ -1,0 +1,10 @@
+august 22
+naive implementation, mostly placeholder
+using bm25 and vsm alternatively
+on smoke_test:
+bm25 gave results - 0.8199 0.6479 0.6387
+vsm gave - 0.8444 0.6583 0.6569
+
+on new dataset (NFCorpus):
+bm25 = 0.2596 0.0763 0.1893
+vsm = 0.2409 0.0667 0.1753
