@@ -8,3 +8,11 @@ data/full/
 *.aux
 *.out
 *.log
+
+dev/results/current.json
+dev/results/best.previous.json
+dev/results/runs/*
+!dev/results/runs/.gitkeep
+
+dev/_test_index/
+handoff.md

@@ -1,10 +1,25 @@
-august 22
+basic pipeline -
+1. tokenise
+2. inverted index
+3. query processing
+4. candidate documents scoring+ranking (VSM or BM25)
+
+
+--------- optimisation possibilities
+representation
+query processing - decompose into steps and see which one to work on
+candidate recognition - from each query term see how to combine the candidates (union, or AND, or smth else)
+maintain top-k heap throughout instead of scoring everything first
+possible precomputations in BM25
+
+
+--------- august 22
 naive implementation, mostly placeholder
 using bm25 and vsm alternatively
 on smoke_test:
 bm25 gave results - 0.8199 0.6479 0.6387
 vsm gave - 0.8444 0.6583 0.6569
 
-on new dataset (NFCorpus):
+on new dataset (NFCorpus): 3.4MB
 bm25 = 0.2596 0.0763 0.1893
 vsm = 0.2409 0.0667 0.1753
