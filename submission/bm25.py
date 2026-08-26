@@ -30,98 +30,50 @@ parameters, not hard-coded — you need to sweep them for your report
 from typing import List, Tuple, Dict, Optional
 import math
 
-from submission.indexer import InvertedIndex, tokenize
+from submission.indexer import InvertedIndex, Tokenizer
 
 _INDEX: Optional[InvertedIndex] = None
+_TOKENIZER: Optional[Tokenizer] = None
 _IDF: Dict[str, float] = {}
 
 
-def build(index: InvertedIndex) -> None:
-    """Optional: precompute anything BM25-specific (e.g. cached IDF values
-    per term) from the InvertedIndex built in indexer.py.
-
-    Call this from retrieve.load_index(), not retrieve.build_index() —
-    the harness runs those two in separate processes, so any cache this
-    creates only needs to exist in the process that also calls
-    retrieve(). If you want a precomputed cache to persist across the
-    build/load boundary too, write it out via InvertedIndex.save() instead
-    (it then counts toward your index-size score) and rebuild the cache
-    here from the loaded index."""
-    global _INDEX, _IDF
-
+def build(index: InvertedIndex, tokenizer: Tokenizer) -> None:
+    global _INDEX, _TOKENIZER, _IDF
     _INDEX = index
+    _TOKENIZER = tokenizer
     _IDF = {}
-
+    
     for term, postings in index.postings.items():
         df = len(postings)
-
-        # +1-smoothed Robertson/Sparck Jones IDF.
-        idf = math.log(
-            ((index.N - df + 0.5) / (df + 0.5)) + 1.0
-        )
-
+        idf = math.log(((index.N - df + 0.5) / (df + 0.5)) + 1.0)
         _IDF[term] = idf
 
 
 def score(query: str, k: int, k1: float = 1.2, b: float = 0.75) -> List[Tuple[str, float]]:
     """Return up to k (doc_id, score) pairs for `query`, BM25-ranked,
     highest score first."""
-    if _INDEX is None:
+    if _INDEX is None or _TOKENIZER is None:
         raise RuntimeError("bm25.build() must be called before bm25.score().")
+    if k <= 0: return []
 
-    if k <= 0:
-        return []
-
-    tokens = tokenize(query)
-
-    # BM25's scoring formula is term-based. Using unique query terms
-    # avoids accidentally counting the same query term multiple times.
+    tokens = _TOKENIZER.tokenize(query)
     query_terms = set(tokens)
-
     scores: Dict[str, float] = {}
-
     avgdl = _INDEX.avg_doc_len
-
-    if avgdl <= 0:
-        return []
+    
+    if avgdl <= 0: return []
 
     for term in query_terms:
         postings = _INDEX.postings.get(term)
-
-        # Unknown query term.
-        if not postings:
-            continue
-
+        if not postings: continue
         idf = _IDF.get(term)
-
-        if idf is None:
-            continue
+        if idf is None: continue
 
         for doc_id, tf in postings.items():
             doc_length = _INDEX.doc_len[doc_id]
-
-            denominator = (
-                tf
-                + k1 * (
-                    1.0
-                    - b
-                    + b * (doc_length / avgdl)
-                )
-            )
-
-            contribution = (
-                idf
-                * (tf * (k1 + 1.0))
-                / denominator
-            )
-
+            denominator = (tf + k1 * (1.0 - b + b * (doc_length / avgdl)))
+            contribution = (idf * (tf * (k1 + 1.0)) / denominator)
             scores[doc_id] = scores.get(doc_id, 0.0) + contribution
 
-    # Deterministic tie-breaking by doc_id.
-    ranked = sorted(
-        scores.items(),
-        key=lambda item: (-item[1], item[0])
-    )
-
+    ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     return ranked[:k]
-

@@ -1,21 +1,21 @@
 {
-  "timestamp_utc": "2026-08-23T14:51:07.709573+00:00",
-  "experiment": "baseline",
+  "timestamp_utc": "2026-08-26T15:57:53.067128+00:00",
+  "experiment": "manual",
   "dataset": "nfcorpus",
-  "git_commit": "1c23cde840ad19202726c8a1db3e093286472d83",
+  "git_commit": "f0bf2f85ff5207ff5d9d2c009c38eaf10e86b723",
   "metrics": {
-    "ndcg@10": 0.25957670231476615,
-    "map@10": 0.07629487199876321,
-    "mrr": 0.46728640015677053,
-    "p@10": 0.2024691358024691,
+    "ndcg@10": 0.2836922984910724,
+    "map@10": 0.08703147613784358,
+    "mrr": 0.48071477562218307,
+    "p@10": 0.2222222222222222,
     "build_time_s": null,
     "load_time_s": null,
-    "index_size_bytes": 3615972,
+    "index_size_bytes": 600022,
     "mean_query_latency_ms": null,
     "max_query_latency_ms": null,
-    "provisional_score": null
+    "provisional_score": 0.20728775655753504
   },
-  "harness_wall_time_s": 2.0448865419602953,
-  "run_file": "dev/results/runs/nfcorpus_20260823_202105.trec",
-  "report_file": "dev/results/runs/nfcorpus_20260823_202105.json"
+  "harness_wall_time_s": 1.6571757500059903,
+  "run_file": "dev/results/runs/nfcorpus_20260826_212751.trec",
+  "report_file": "dev/results/runs/nfcorpus_20260826_212751.json"
 }

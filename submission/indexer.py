@@ -29,129 +29,186 @@ assignments — see the `save()` docstring for concrete starting points.
 import os
 import pickle
 import re
-from typing import Dict, List, Tuple
+import gzip
+from functools import lru_cache
+from typing import Dict, List, Tuple, Any
+
+# Hardcoded small stopword list to avoid NLTK download dependencies at grading time.
+_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", 
+    "into", "is", "it", "no", "not", "of", "on", "or", "such", "that", "the", 
+    "their", "then", "there", "these", "they", "this", "to", "was", "will", "with"
+}
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
+class Tokenizer:
+    def __init__(self, use_stopwords: bool = True, use_stemmer: bool = True):
+        self.use_stopwords = use_stopwords
+        self.use_stemmer = use_stemmer
+        self.config = {"stopwords": use_stopwords, "stemming": use_stemmer}
+        
+        if self.use_stemmer:
+            from nltk.stem import PorterStemmer
+            stemmer = PorterStemmer()
+            # Cache stems to avoid redundant processing of common words
+            @lru_cache(maxsize=None)
+            def _stem(token: str) -> str:
+                return stemmer.stem(token)
+            self._stem = _stem
 
-def tokenize(text: str) -> List[str]:
-    """Lowercase, alphanumeric-only tokenization."""
-    return _TOKEN_RE.findall(text.lower())
+    def tokenize(self, text: str) -> List[str]:
+        """Lowercase, alphanumeric-only tokenization."""
+        tokens = _TOKEN_RE.findall(text.lower())
+        if self.use_stopwords:
+            tokens = [t for t in tokens if t not in _STOPWORDS]
+        if self.use_stemmer:
+            tokens = [self._stem(t) for t in tokens]
+        return tokens
+
+# --- Minimal Varint Encoder/Decoder ---
+def encode_varint(n: int, out: bytearray) -> None:
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        if n:
+            out.append(b | 0x80)
+        else:
+            out.append(b)
+            return
+
+def decode_varint_stream(data: bytes) -> List[int]:
+    ints = []
+    i = 0
+    while i < len(data):
+        n = 0
+        shift = 0
+        while True:
+            b = data[i]
+            i += 1
+            n |= (b & 0x7F) << shift
+            if not (b & 0x80):
+                break
+            shift += 7
+        ints.append(n)
+    return ints
+# --------------------------------------
 
 
 class InvertedIndex:
-    """A minimal inverted index skeleton. Extend the data structures here
-    however your design needs (e.g. term positions for phrase/proximity
-    scoring, a more compact postings representation for the efficiency
-    bonus) — this is a starting point, not a fixed schema.
-    """
-
     def __init__(self):
-        self.postings: Dict[str, Dict[str, int]] = {}  # term -> {doc_id: term_freq}
-        self.doc_len: Dict[str, int] = {}  # doc_id -> number of tokens
-        self.doc_text: Dict[str, str] = {}  # doc_id -> raw text (handy for VSM/debugging)
-        self.N: int = 0  # number of documents
+        # In-memory representation: term -> {doc_id_str: tf}
+        self.postings: Dict[str, Dict[str, int]] = {}
+        self.doc_len: Dict[str, int] = {}
+        self.N: int = 0
         self.avg_doc_len: float = 0.0
+        self.tokenizer_config: Dict[str, Any] = {}
 
-    def build(self, corpus: List[Tuple[str, str]]) -> None:
+    def build(self, corpus: List[Tuple[str, str]], tokenizer: Tokenizer) -> None:
         """corpus: list of (doc_id, text) pairs, e.g. from
         submission.corpus_utils.load_corpus().
         """
-
-        self.postings = {}
+        self.tokenizer_config = tokenizer.config
         self.doc_len = {}
-        self.doc_text = {}
-
+        
+        # Temporary structure for building
+        temp_postings: Dict[str, Dict[str, int]] = {}
+        
         for doc_id, text in corpus:
-            tokens = tokenize(text)
-
+            tokens = tokenizer.tokenize(text)
             self.doc_len[doc_id] = len(tokens)
-            self.doc_text[doc_id] = text
-
+            
             term_counts: Dict[str, int] = {}
-
             for term in tokens:
                 term_counts[term] = term_counts.get(term, 0) + 1
-
+                
             for term, tf in term_counts.items():
-                if term not in self.postings:
-                    self.postings[term] = {}
-
-                self.postings[term][doc_id] = tf
-
+                if term not in temp_postings:
+                    temp_postings[term] = {}
+                temp_postings[term][doc_id] = tf
+                
+        self.postings = temp_postings
         self.N = len(self.doc_len)
-
-        if self.N > 0:
-            self.avg_doc_len = sum(self.doc_len.values()) / self.N
-        else:
-            self.avg_doc_len = 0.0
-
+        self.avg_doc_len = sum(self.doc_len.values()) / self.N if self.N > 0 else 0.0
 
     def document_frequency(self, term: str) -> int:
-        """Number of documents containing `term` at least once.
-
-        TODO(you): implement using self.postings.
+        """
+        Number of documents containing `term` at least once.
         """
         postings = self.postings.get(term)
-        if postings is None:
-            return 0
-
-        return len(postings)
+        return len(postings) if postings else 0
 
     def save(self, index_dir: str) -> None:
-        """Persist everything document_frequency() / your scorers need to
-        `index_dir`, so `load()` can reconstruct this object in a fresh
-        process with no memory of `build()` ever having run. Called from
-        retrieve.build_index().
-
-        The on-disk byte size of whatever you write here is graded
-        directly (assignment Section 7, "index size", relative to the
-        class median) — some starting points, roughly in order of effort:
-          - json/pickle-dump self.postings etc. directly (works, but
-            verbose: repeats every doc_id string per posting).
-          - drop self.doc_text if your scorers don't need raw text at
-            query time (BM25/VSM only need term-frequency and length
-            statistics, not the original documents).
-          - delta-encode each postings list's doc-ids (sorted ascending,
-            store gaps instead of absolute ids) and varint/byte-pack them,
-            instead of a naive JSON list of integers.
-        """
-
+        """Compresses postings using delta-encoding, varint packing, and Gzip."""
         os.makedirs(index_dir, exist_ok=True)
+        
+        # 1. Map string doc_ids to integers to save space
+        doc_id_to_int = {doc_id: i for i, doc_id in enumerate(self.doc_len.keys())}
+        int_to_doc_id = list(self.doc_len.keys())
+        
+        packed_postings: Dict[str, bytes] = {}
+        
+        for term, doc_tfs in self.postings.items():
+            out = bytearray()
+            # Sort integer IDs for delta encoding
+            sorted_docs = sorted([(doc_id_to_int[doc_id], tf) for doc_id, tf in doc_tfs.items()])
+            
+            last_doc_int = 0
+            for doc_int, tf in sorted_docs:
+                delta = doc_int - last_doc_int
+                encode_varint(delta, out)
+                encode_varint(tf, out)
+                last_doc_int = doc_int
+                
+            packed_postings[term] = bytes(out)
 
         data = {
-            "postings": self.postings,
+            "packed_postings": packed_postings,
+            "int_to_doc_id": int_to_doc_id,
             "doc_len": self.doc_len,
             "N": self.N,
             "avg_doc_len": self.avg_doc_len,
-        } # Currently does not save the raw text for current implementation does not use that
+            "tokenizer_config": self.tokenizer_config
+        }
 
-        path = os.path.join(index_dir, "index.pkl")
-
-        with open(path, "wb") as f:
+        # 2. Gzip the final pickle payload for maximum disk space efficiency
+        path = os.path.join(index_dir, "index.pkl.gz")
+        with gzip.open(path, "wb") as f:
             pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
-
 
     @classmethod
     def load(cls, index_dir: str) -> "InvertedIndex":
-        """Reconstruct an InvertedIndex purely from what save() wrote to
+        """
+        Decodes the compressed payload back into standard dictionaries for scoring.
+        Reconstruct an InvertedIndex purely from what save() wrote to
         `index_dir`. Called in a fresh process — do not rely on any state
         other than what's actually on disk in `index_dir`.
         """
-
-        path = os.path.join(index_dir, "index.pkl")
-
-        with open(path, "rb") as f:
+        path = os.path.join(index_dir, "index.pkl.gz")
+        with gzip.open(path, "rb") as f:
             data = pickle.load(f)
 
         index = cls()
-
-        index.postings = data["postings"]
         index.doc_len = data["doc_len"]
         index.N = data["N"]
         index.avg_doc_len = data["avg_doc_len"]
-
-        # Raw text isn't needed by the naive retrieval system.
-        index.doc_text = {}
-
+        index.tokenizer_config = data["tokenizer_config"]
+        
+        int_to_doc_id = data["int_to_doc_id"]
+        
+        # Unpack the varint postings back into {term: {doc_id_str: tf}}
+        for term, blob in data["packed_postings"].items():
+            integers = decode_varint_stream(blob)
+            decoded_dict = {}
+            last_doc_int = 0
+            
+            for i in range(0, len(integers), 2):
+                delta = integers[i]
+                tf = integers[i+1]
+                doc_int = last_doc_int + delta
+                decoded_dict[int_to_doc_id[doc_int]] = tf
+                last_doc_int = doc_int
+                
+            index.postings[term] = decoded_dict
+            
         return index

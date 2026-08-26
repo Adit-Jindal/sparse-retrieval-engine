@@ -149,6 +149,7 @@ def extract_metrics(report: dict[str, Any]) -> dict[str, Any]:
         "provisional_score": (
             "provisional score",
             "provisional_score",
+            "provisional_score_80pct",
         ),
     }
 
