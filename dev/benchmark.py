@@ -21,9 +21,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 
-DEFAULT_CORPUS = ROOT / "data/nfcorpus/corpus.jsonl"
-DEFAULT_QUERIES = ROOT / "data/nfcorpus/queries_dev.tsv"
-DEFAULT_QRELS = ROOT / "data/nfcorpus/qrels_dev.txt"
+DEFAULT_CORPUS = ROOT / "data/full/corpus.jsonl"
+DEFAULT_QUERIES = ROOT / "data/full/queries_dev.tsv"
+DEFAULT_QRELS = ROOT / "data/full/qrels_dev.txt"
 DEFAULT_BASELINE_RUN = ROOT / "data/toy/reference_bm25_run_dev.trec"
 
 RESULTS_DIR = ROOT / "dev/results"
@@ -293,7 +293,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dataset",
-        default="nfcorpus",
+        default="full",
     )
 
     return parser.parse_args()

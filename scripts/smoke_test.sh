@@ -24,9 +24,9 @@ echo
 echo "All smoke checks passed."
 
 # python -m harness.run_harness \
-#   --corpus data/nfcorpus/corpus.jsonl \
-#   --queries data/nfcorpus/queries_dev.tsv \
-#   --qrels data/nfcorpus/qrels_test.txt \
+#   --corpus data/full/corpus.jsonl \
+#   --queries data/full/queries_dev.tsv \
+#   --qrels data/full/qrels_dev.txt \
 #   --baseline-run data/toy/reference_bm25_run_dev.trec \
 #   --run-out runs/dev_run.trec \
 #   --report-out runs/dev_report.json

@@ -1,27 +1,28 @@
-import json
+from harness.trec_io import read_queries, read_qrels
+from harness.metrics import evaluate_run
 import itertools
-from submission import retrieve
+import json
+from submission import bm25, retrieve
 
-def grid_search_bm25():
-    """Sweeps k1 and b combinations on the toy dataset."""
-    k1_vals = [0.8, 1.2, 1.6]
-    b_vals = [0.5, 0.75, 1.0]
-    
-    print("Beginning BM25 Parameter Sweep...")
-    retrieve.build_index("data/toy/corpus.jsonl", "index_dir_tmp")
-    retrieve.load_index("index_dir_tmp")
-    
-    history_log = []
-    
+def grid_search_bm25(corpus="data/nfcorpus/corpus.jsonl", queries_path="data/nfcorpus/queries_dev.tsv", qrels_path="data/nfcorpus/qrels_dev.txt", k1_vals=[0.8,1.2,1.6], b_vals=[0.5,0.75,1.0]):
+    retrieve.build_index(corpus, "index_dir_tmp")
+    retrieve.load_index("index_dir_tmp")  # populates bm25._INDEX, bm25._IDF via bm25.build()
+
+    queries = read_queries(queries_path)
+    qrels = read_qrels(qrels_path)
+    results = []
+
     for k1, b in itertools.product(k1_vals, b_vals):
-        # We patch bm25 defaults temporarily to test
-        # (In a real setup, we'd invoke harness.run_harness passing these)
-        print(f"Testing k1={k1}, b={b} (Run manual verification later via harness)")
-        history_log.append({"experiment": f"k1_{k1}_b_{b}"})
-        
-    with open("dev/results/history.jsonl", "a") as f:
-        for entry in history_log:
-            f.write(json.dumps(entry) + "\n")
+        run = {qid: bm25.score(text, 10, k1=k1, b=b) for qid, text in queries}
+        agg = evaluate_run(run, qrels, k=10)["aggregate"]
+        entry = {"experiment": f"bm25_k1={k1}_b={b}", "k1": k1, "b": b, **agg}
+        results.append(entry)
+        print(f"k1={k1:.2f} b={b:.2f}  nDCG@10={agg['ndcg@10']:.4f}  MAP@10={agg['map@10']:.4f}")
 
-if __name__ == "__main__":
+    with open("dev/results/history.jsonl", "a") as f:
+        for e in results:
+            f.write(json.dumps(e) + "\n")
+    return results
+
+if __name__=="__main__":
     grid_search_bm25()
