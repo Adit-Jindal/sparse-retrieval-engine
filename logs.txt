@@ -5,12 +5,24 @@ basic pipeline -
 4. candidate documents scoring+ranking (VSM or BM25)
 
 
+
+
+
+
 --------- optimisation possibilities
 representation
 query processing - decompose into steps and see which one to work on
 candidate recognition - from each query term see how to combine the candidates (union, or AND, or smth else)
 maintain top-k heap throughout instead of scoring everything first
 possible precomputations in BM25
+
+
+
+
+
+
+
+
 
 
 --------- august 22
@@ -23,3 +35,183 @@ vsm gave - 0.8444 0.6583 0.6569
 on new dataset (NFCorpus): 3.4MB
 bm25 = 0.2596 0.0763 0.1893
 vsm = 0.2409 0.0667 0.1753
+
+
+
+
+
+
+
+
+---------- august 26
+added full dataset to test against
+slightly optimised version gave nDCG ~ 0.5
+made sweep files to test for different cofigurations
+
+
+
+
+
+
+
+
+
+----------- august 27
+added RM3
+nDCG@10 reaches 0.65 against the full dataset
+minimising stopwords does not seem to help, giving these results - 
+============================================================================================
+config                         nDCG@10    MAP@10   mean_lat_ms   max_lat_ms     idx_bytes
+--------------------------------------------------------------------------------------------
+bm25_coverage_baseline          0.6478    0.0157         32.37        70.96    18,716,300
+prf_only                        0.6551    0.0162         87.49       158.55    18,716,300
+prf_plus_coverage               0.6524    0.0160         88.22       158.27    18,716,300
+bm25_vsm_prf_coverage           0.6536    0.0162        178.20       426.58    18,716,300
+stopwords_minimal               0.6101    0.0150        100.78       204.49    19,755,365
+stopwords_none                  0.6070    0.0156        226.81       336.12    21,339,802
+============================================================================================
+tried these configs -
+
+    # Stage 1: fine-tune PRF's own knobs against the frozen base.
+    "prf_knobs": [
+        ("base", {}),
+        ("alpha_0.4", {"CUSTOM_SCORER_PRF_ALPHA": "0.4"}),
+        ("alpha_0.5", {"CUSTOM_SCORER_PRF_ALPHA": "0.5"}),
+        ("alpha_0.7", {"CUSTOM_SCORER_PRF_ALPHA": "0.7"}),
+        ("alpha_0.8", {"CUSTOM_SCORER_PRF_ALPHA": "0.8"}),
+        ("topdocs_5", {"CUSTOM_SCORER_PRF_TOP_DOCS": "5"}),
+        ("topdocs_15", {"CUSTOM_SCORER_PRF_TOP_DOCS": "15"}),
+        ("topdocs_20", {"CUSTOM_SCORER_PRF_TOP_DOCS": "20"}),
+        ("topterms_10", {"CUSTOM_SCORER_PRF_TOP_TERMS": "10"}),
+        ("topterms_30", {"CUSTOM_SCORER_PRF_TOP_TERMS": "30"}),
+        ("topterms_40", {"CUSTOM_SCORER_PRF_TOP_TERMS": "40"}),
+    ],
+    # Stage 2: latency trim — tighten the max-df filter, using whatever
+    # PRF_ALPHA/TOP_DOCS/TOP_TERMS won stage 1 (fold those into
+    # FROZEN_BASE before running this).
+    "latency": [
+        ("base", {}),
+        ("df_ratio_0.3", {"CUSTOM_SCORER_PRF_MAX_DF_RATIO": "0.3"}),
+        ("df_ratio_0.2", {"CUSTOM_SCORER_PRF_MAX_DF_RATIO": "0.2"}),
+        ("df_ratio_0.15", {"CUSTOM_SCORER_PRF_MAX_DF_RATIO": "0.15"}),
+    ],
+    # Stage 3: re-check k1/b now that PRF is in the loop, using whatever
+    # won stages 1-2 (fold those into FROZEN_BASE before running this).
+    "k1_b_recheck": [
+        ("base_1.6_0.5", {}),
+        ("k1_1.2_b_0.5", {"CUSTOM_SCORER_BM25_K1": "1.2"}),
+        ("k1_2.0_b_0.5", {"CUSTOM_SCORER_BM25_K1": "2.0"}),
+        ("k1_1.6_b_0.3", {"CUSTOM_SCORER_BM25_B": "0.3"}),
+        ("k1_1.6_b_0.7", {"CUSTOM_SCORER_BM25_B": "0.7"}),
+    ],
+    "prf_weight": [
+        ("pw_0.3", {"CUSTOM_SCORER_PRF_WEIGHT": "0.3"}),
+        ("pw_0.5", {}),  # current default
+        ("pw_0.7", {"CUSTOM_SCORER_PRF_WEIGHT": "0.7"}),
+        ("pw_1.0", {"CUSTOM_SCORER_PRF_WEIGHT": "1.0"}),
+    ],
+and decided on the final one, for both full and nfcorpus
+periodically checked for results for fine tuning after each change
+
+current pipeline (4:30PM)
+1. Indexing (indexer.py, run once in build_index())
+Tokenization T: text → [token]
+Regex [a-z0-9]+ on lowercased text — alphanumeric maximal runs, no punctuation survives, no handling of hyphenated compounds, numbers, or units as distinct entity types.
+Stopword removal against a fixed standard English list (~150 words), applied before stemming.
+Stemming: Porter stemmer, LRU-cached per unique surface form.
+Index structure: classic inverted index.
+postings: term → {doc_id → tf} (term frequency, no positions)
+doc_len: doc_id → token count
+N, avg_doc_len: corpus-level scalars
+No positional information, no field structure (single flat text per doc, no title/body distinction available in this corpus per your earlier note), no document-level metadata beyond length.
+Persistence: term-sorted, delta-varint-encoded postings in one contiguous blob + offset table, doc lengths as a flat varint array, all gzip-compressed (level 9). ~18.7MB for the current corpus.
+2. First-pass retrieval (bm25.py)
+Standard Okapi BM25, k1=1.6, b=0.5 (tuned), Robertson-Sparck-Jones +1-smoothed IDF. Query terms are unweighted set (set(tokens) — note: query term frequency is discarded here, a duplicate query term contributes no extra weight in this path). Single postings traversal per query term, heapq.nsmallest for top-k.
+3. Query expansion (custom_scorer.py's PRF)
+RM3-lite, three stages:
+First-pass BM25 → top PRF_TOP_DOCS=10 docs.
+Expansion term extraction: for each of those 10 docs, weight every one of its terms by (tf/doclen) × IDF(term); sum across the 10 docs; keep top PRF_TOP_TERMS=10 terms by this score, dropping any term with corpus-wide df/N > PRF_MAX_DF_RATIO=0.15; normalize kept weights to sum to 1.
+Query model interpolation: original query terms get uniform weight 1/|Q| each; combined weight per term = α·orig + (1-α)·expansion, α=0.5; second BM25 pass (_weighted_bm25_scores, a from-scratch weighted generalization of the BM25 formula) over this combined term set.
+4. Fusion (custom_scorer.py's score())
+Reciprocal Rank Fusion over two ranked lists (original BM25, PRF-rescored), RRF_K=60:
+fused(d) = Σ_lists weight_list / (RRF_K + rank_in_list(d))
+Currently: BM25_WEIGHT=0.65 (dead weight — this is only ever used if VSM fusion is on, but wait — actually BM25's own list is always fused in with BM25_WEIGHT, let me check... yes, the base BM25 ranking is always added to rrf using BM25_WEIGHT/(RRF_K+rank), and PRF's list is added using PRF_WEIGHT/(RRF_K+rank). So BM25_WEIGHT=0.65 and PRF_WEIGHT=1.0 (just frozen) — these are asymmetric and this asymmetry was never itself swept as a pair, only PRF_WEIGHT alone against a fixed BM25_WEIGHT=0.65.)
+VSM fusion: off (measured negative ROI: no quality gain, ~2× latency).
+Coverage bonus: off (measured negative ROI: double-counts PRF's own effect).
+5. Output
+heapq.nsmallest(k, ...) on (-score, doc_id).
+6. Robustness
+retrieve() wraps custom_scorer.score() in try/except, falling back to plain BM25 on any exception.
+
+
+tried these- 
+"fusion_mode": [
+        ("rrf", {}),  # == current frozen default
+        ("linear", {"CUSTOM_SCORER_FUSION_MODE": "linear"}),
+    ],
+
+    # Stage 1b: RRF_K and the BM25_WEIGHT/PRF_WEIGHT pair, swept jointly
+    # — this pairing was flagged as never having been tested together
+    # and is the least-explored corner of an otherwise heavily-tuned
+    # fusion layer. PRF_WEIGHT here starts from 1.0 (its own
+    # independently-confirmed best) and BM25_WEIGHT is varied around it.
+    "rrf_weights": [
+        ("base", {}),  # rrf_k=60, bm25_w=0.65, prf_w=1.0
+        ("rrfk_30", {"CUSTOM_SCORER_RRF_K": "30"}),
+        ("rrfk_100", {"CUSTOM_SCORER_RRF_K": "100"}),
+        ("bm25w_0.5", {"CUSTOM_SCORER_BM25_WEIGHT": "0.5"}),
+        ("bm25w_1.0", {"CUSTOM_SCORER_BM25_WEIGHT": "1.0"}),
+        ("bm25w_1.0_prfw_1.0_rrfk_30", {
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.0", "CUSTOM_SCORER_RRF_K": "30",
+        }),
+        ("bm25w_0.5_prfw_1.0_rrfk_100", {
+            "CUSTOM_SCORER_BM25_WEIGHT": "0.5", "CUSTOM_SCORER_RRF_K": "100",
+        }),
+    ],
+
+    # Stage 1b': same weight grid as rrf_weights, but under linear fusion
+    # — needed for a fair RRF-at-its-best vs linear-at-its-best
+    # comparison, since linear has never had its own weight tuning.
+    "linear_weights": [
+        ("base", {"CUSTOM_SCORER_FUSION_MODE": "linear"}),
+        ("bm25w_0.5", {"CUSTOM_SCORER_FUSION_MODE": "linear", "CUSTOM_SCORER_BM25_WEIGHT": "0.5"}),
+        ("bm25w_1.0", {"CUSTOM_SCORER_FUSION_MODE": "linear", "CUSTOM_SCORER_BM25_WEIGHT": "1.0"}),
+        ("bm25w_1.5", {"CUSTOM_SCORER_FUSION_MODE": "linear", "CUSTOM_SCORER_BM25_WEIGHT": "1.5"}),
+        ("prfw_0.5", {"CUSTOM_SCORER_FUSION_MODE": "linear", "CUSTOM_SCORER_PRF_WEIGHT": "0.5"}),
+        ("prfw_1.5", {"CUSTOM_SCORER_FUSION_MODE": "linear", "CUSTOM_SCORER_PRF_WEIGHT": "1.5"}),
+        ("bm25w_1.0_prfw_0.5", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.0", "CUSTOM_SCORER_PRF_WEIGHT": "0.5",
+        }),
+    ],
+
+    # Stage 1c: PRF seed-doc weighting by first-pass score (query-drift
+    # mitigation) — binary flag, cheap to test in isolation.
+    "prf_seed_weighting": [
+        ("off", {}),  # current default
+        ("on", {"CUSTOM_SCORER_PRF_WEIGHT_SEEDS_BY_SCORE": "1"}),
+    ],
+
+    # Stage 1d: separate PRF_ALPHA for short queries. Sweep both the
+    # short-query alpha value AND the length threshold that defines
+    # "short", since the right threshold isn't obvious a priori.
+    "short_query_alpha": [
+        ("off", {}),  # alpha_short == alpha == 0.5, no-op
+        ("thresh2_alpha0.3", {
+            "CUSTOM_SCORER_SHORT_QUERY_MAX_TERMS": "2",
+            "CUSTOM_SCORER_PRF_ALPHA_SHORT": "0.3",
+        }),
+        ("thresh2_alpha0.7", {
+            "CUSTOM_SCORER_SHORT_QUERY_MAX_TERMS": "2",
+            "CUSTOM_SCORER_PRF_ALPHA_SHORT": "0.7",
+        }),
+        ("thresh3_alpha0.3", {
+            "CUSTOM_SCORER_SHORT_QUERY_MAX_TERMS": "3",
+            "CUSTOM_SCORER_PRF_ALPHA_SHORT": "0.3",
+        }),
+        ("thresh3_alpha0.7", {
+            "CUSTOM_SCORER_SHORT_QUERY_MAX_TERMS": "3",
+            "CUSTOM_SCORER_PRF_ALPHA_SHORT": "0.7",
+        }),
+    ],
+Linear - no visible benefit, so staying at RRF

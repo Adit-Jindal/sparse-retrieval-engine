@@ -1,6 +1,6 @@
-"""submission/boolean_vsm.py — Boolean/VSM cosine ranking. IDF is now
-cached once per term in build() instead of recomputed inside the O(candidates
-x query_terms) scoring loop — same output, no repeated log() calls."""
+"""submission/boolean_vsm.py — Boolean/VSM cosine ranking. Currently
+unused by retrieve.py's default path (USE_VSM_FUSION=False, measured
+negative ROI) but kept working and independently testable."""
 import heapq
 import math
 from typing import Dict, List, Tuple, Optional

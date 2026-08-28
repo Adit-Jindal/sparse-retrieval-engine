@@ -1,6 +1,6 @@
-"""submission/bm25.py — Okapi BM25 ranking. Formula/docstring unchanged
-from the original; only the top-k selection is now heap-based instead of
-a full sort, which is a pure speed win with identical output."""
+"""submission/bm25.py — Okapi BM25 ranking. Kept as a stable, untouched,
+independently-testable reference scorer; all new experimental behavior
+lives in custom_scorer.py, not here."""
 from typing import List, Tuple, Dict, Optional
 import heapq
 import math
@@ -22,7 +22,7 @@ def build(index: InvertedIndex, tokenizer: Tokenizer) -> None:
         _IDF[term] = math.log(((index.N - df + 0.5) / (df + 0.5)) + 1.0)
 
 
-def score(query: str, k: int, k1: float = 1.2, b: float = 0.75) -> List[Tuple[str, float]]:
+def score(query: str, k: int, k1: float = 1.6, b: float = 0.5) -> List[Tuple[str, float]]:
     if _INDEX is None or _TOKENIZER is None:
         raise RuntimeError("bm25.build() must be called before bm25.score().")
     if k <= 0:
@@ -47,7 +47,4 @@ def score(query: str, k: int, k1: float = 1.2, b: float = 0.75) -> List[Tuple[st
             denom = tf + k1 * (1.0 - b + b * (doc_length / avgdl))
             scores[doc_id] = scores.get(doc_id, 0.0) + (idf * tf * (k1 + 1.0)) / denom
 
-    # heapq.nsmallest on (-score, doc_id) == sorted(...)[:k] on the same
-    # key, just O(m log k) instead of O(m log m) — same top-k, same
-    # tie-break, faster when len(scores) >> k.
     return heapq.nsmallest(k, scores.items(), key=lambda item: (-item[1], item[0]))
