@@ -214,10 +214,13 @@ class InvertedIndex:
         self.tokenizer_config: Dict[str, Any] = {}
         self.cap_score: Dict[str, float] = {}          # term -> proper-noun-ish score in [0,1]
         self.title_postings: Dict[str, Dict[str, int]] = {}  # term -> {doc_id: 1}, presence only
+        self.positions: Dict[str, Dict[str, List[int]]] = {}  # term -> {doc_id: [token_idx, ...]}
 
     def build(self, corpus: List[Tuple[str, str]], tokenizer: Tokenizer,
               use_corpus_stopwords: bool = False, corpus_stopword_df_ratio: float = 0.85,
-              use_capitalization: bool = False, use_pseudo_title: bool = False) -> None:
+              use_capitalization: bool = False, use_pseudo_title: bool = False,
+              use_positions: bool = False) -> None:
+        temp_positions: Dict[str, Dict[str, List[int]]] = {}
         self.tokenizer_config = dict(tokenizer.config)
         self.doc_len = {}
         temp_postings: Dict[str, Dict[str, int]] = {}
@@ -228,8 +231,10 @@ class InvertedIndex:
             tokens = tokenizer.tokenize(text)
             self.doc_len[doc_id] = len(tokens)
             term_counts: Dict[str, int] = {}
-            for term in tokens:
+            for idx, term in enumerate(tokens):
                 term_counts[term] = term_counts.get(term, 0) + 1
+                if use_positions:
+                    temp_positions.setdefault(term, {}).setdefault(doc_id, []).append(idx)
             for term, tf in term_counts.items():
                 temp_postings.setdefault(term, {})[doc_id] = tf
 
@@ -250,6 +255,10 @@ class InvertedIndex:
         self.tokenizer_config["corpus_stopword_df_ratio"] = corpus_stopword_df_ratio
         self.tokenizer_config["use_capitalization"] = use_capitalization
         self.tokenizer_config["use_pseudo_title"] = use_pseudo_title
+        self.tokenizer_config["use_positions"] = use_positions
+        if use_positions:
+            # positions are collected in tokenize-order already sorted per doc
+            self.positions = temp_positions
 
         if use_corpus_stopwords and self.N > 0:
             to_drop = [t for t, postings in self.postings.items()
@@ -315,6 +324,59 @@ class InvertedIndex:
             postings[term] = decoded
         return postings
 
+    @staticmethod
+    def _encode_positions(positions: Dict[str, Dict[str, List[int]]],
+                           doc_id_to_int: Dict[str, int]):
+        terms_sorted = sorted(positions.keys())
+        blob = bytearray()
+        offsets = [0]
+        for term in terms_sorted:
+            sorted_docs = sorted(positions[term].items(), key=lambda kv: doc_id_to_int[kv[0]])
+            last_doc = 0
+            for doc_id, plist in sorted_docs:
+                doc_int = doc_id_to_int[doc_id]
+                encode_varint(doc_int - last_doc, blob)
+                last_doc = doc_int
+                encode_varint(len(plist), blob)
+                last_pos = 0
+                for p in plist:  # already ascending (built in token order)
+                    encode_varint(p - last_pos, blob)
+                    last_pos = p
+            offsets.append(len(blob))
+        offsets_bytes = bytearray()
+        last_off = 0
+        for off in offsets:
+            encode_varint(off - last_off, offsets_bytes)
+            last_off = off
+        return terms_sorted, bytes(blob), bytes(offsets_bytes)
+
+    @staticmethod
+    def _decode_positions(terms: List[str], blob: bytes, offsets_blob: bytes,
+                           int_to_doc_id: List[str]) -> Dict[str, Dict[str, List[int]]]:
+        offset_deltas = decode_varint_stream(offsets_blob)
+        offsets, running = [], 0
+        for d in offset_deltas:
+            running += d
+            offsets.append(running)
+        result: Dict[str, Dict[str, List[int]]] = {}
+        for i, term in enumerate(terms):
+            chunk = blob[offsets[i]:offsets[i + 1]]
+            ints = decode_varint_stream(chunk)
+            doc_map: Dict[str, List[int]] = {}
+            j = 0
+            last_doc = 0
+            while j < len(ints):
+                doc_int = last_doc + ints[j]; last_doc = doc_int; j += 1
+                count = ints[j]; j += 1
+                plist = []
+                last_pos = 0
+                for _ in range(count):
+                    last_pos += ints[j]; j += 1
+                    plist.append(last_pos)
+                doc_map[int_to_doc_id[doc_int]] = plist
+            result[term] = doc_map
+        return result
+
     def save(self, index_dir: str) -> None:
         os.makedirs(index_dir, exist_ok=True)
         int_to_doc_id = list(self.doc_len.keys())
@@ -353,6 +415,11 @@ class InvertedIndex:
             data["title_terms"] = t_terms
             data["title_postings_blob"] = t_blob
             data["title_offsets_blob"] = t_offsets
+        if self.positions:
+            p_terms, p_blob, p_offsets = self._encode_positions(self.positions, doc_id_to_int)
+            data["position_terms"] = p_terms
+            data["position_blob"] = p_blob
+            data["position_offsets"] = p_offsets
 
         path = os.path.join(index_dir, "index.pkl.gz")
         with gzip.open(path, "wb", compresslevel=9) as f:
@@ -387,6 +454,10 @@ class InvertedIndex:
         if "title_terms" in data:
             index.title_postings = cls._decode_postings(
                 data["title_terms"], data["title_postings_blob"], data["title_offsets_blob"], int_to_doc_id
+            )
+        if "position_terms" in data:
+            index.positions = cls._decode_positions(
+                data["position_terms"], data["position_blob"], data["position_offsets"], int_to_doc_id
             )
 
         return index

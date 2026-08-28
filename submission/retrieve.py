@@ -33,6 +33,7 @@ def build_index(corpus_path: str, index_dir: str) -> None:
     corpus_stopword_df_ratio = float(os.environ.get("INDEXER_CORPUS_STOPWORD_DF_RATIO", 0.9))
     use_capitalization = _env_bool("INDEXER_USE_CAPITALIZATION", True)
     use_pseudo_title = _env_bool("INDEXER_USE_PSEUDO_TITLE", True)
+    use_positions = _env_bool("INDEXER_USE_POSITIONS", False)
 
     tokenizer = Tokenizer(
         use_stopwords=True, use_stemmer=True, stopword_set=stopword_set,
@@ -45,6 +46,7 @@ def build_index(corpus_path: str, index_dir: str) -> None:
         corpus_stopword_df_ratio=corpus_stopword_df_ratio,
         use_capitalization=use_capitalization,
         use_pseudo_title=use_pseudo_title,
+        use_positions=use_positions,
     )
     index.save(index_dir)
 
@@ -75,3 +77,4 @@ def retrieve(query: str, k: int = 10) -> List[Tuple[str, float]]:
         # phase on any uncaught exception from retrieve(). Plain BM25,
         # unconditionally trusted, is the floor.
         return bm25.score(query, k, k1=custom_scorer.BM25_K1, b=custom_scorer.BM25_B)
+        # return boolean_vsm.vsm_score(query, k)

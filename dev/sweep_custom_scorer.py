@@ -244,6 +244,30 @@ STAGES: dict = {
             # "INDEXER_USE_BIGRAMS": "1",
         }),
     ],
+
+    "positional_proximity": [
+        ("off", {}),  # baseline: no positions, no boost
+        ("weight_0.1_pool_30", {
+            "INDEXER_USE_POSITIONS": "1",
+            "CUSTOM_SCORER_PROXIMITY_WEIGHT": "0.1",
+            "CUSTOM_SCORER_PROXIMITY_POOL": "30",
+        }),
+        ("weight_0.25_pool_30", {
+            "INDEXER_USE_POSITIONS": "1",
+            "CUSTOM_SCORER_PROXIMITY_WEIGHT": "0.25",
+            "CUSTOM_SCORER_PROXIMITY_POOL": "30",
+        }),
+        ("weight_0.25_pool_50", {
+            "INDEXER_USE_POSITIONS": "1",
+            "CUSTOM_SCORER_PROXIMITY_WEIGHT": "0.25",
+            "CUSTOM_SCORER_PROXIMITY_POOL": "50",
+        }),
+        ("weight_0.5_pool_50", {
+            "INDEXER_USE_POSITIONS": "1",
+            "CUSTOM_SCORER_PROXIMITY_WEIGHT": "0.5",
+            "CUSTOM_SCORER_PROXIMITY_POOL": "50",
+        }),
+    ],
 }
 
 

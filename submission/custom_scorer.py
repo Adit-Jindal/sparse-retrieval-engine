@@ -80,6 +80,8 @@ PRF_ALPHA_SHORT = _env_float("CUSTOM_SCORER_PRF_ALPHA_SHORT", 0.7)
 SHORT_QUERY_MAX_TERMS = int(os.environ.get("CUSTOM_SCORER_SHORT_QUERY_MAX_TERMS", 3))
 CAPITALIZATION_WEIGHT = _env_float("CUSTOM_SCORER_CAPITALIZATION_WEIGHT", 0.5)
 TITLE_BOOST_WEIGHT = _env_float("CUSTOM_SCORER_TITLE_BOOST_WEIGHT", 0.5)
+PROXIMITY_WEIGHT = _env_float("CUSTOM_SCORER_PROXIMITY_WEIGHT", 0.0)
+PROXIMITY_POOL = int(os.environ.get("CUSTOM_SCORER_PROXIMITY_POOL", 50))
 
 _INDEX: Optional[InvertedIndex] = None
 _TOKENIZER: Optional[Tokenizer] = None
@@ -229,6 +231,59 @@ def _match_fraction(candidate_ids, unique_terms: set, weight_fn: Callable[[str],
                 matched[doc_id] += w
     return matched, total
 
+def _min_span(term_position_lists: List[List[int]]) -> Optional[int]:
+    """Smallest window (inclusive) containing at least one position from
+    every list in term_position_lists. Classic k-sorted-lists smallest-
+    range problem, solved via merge + sliding window. All input lists
+    must be non-empty and individually sorted (guaranteed by build-time
+    token-order insertion)."""
+    events: List[Tuple[int, int]] = []
+    for term_idx, plist in enumerate(term_position_lists):
+        for p in plist:
+            events.append((p, term_idx))
+    events.sort()
+
+    need = len(term_position_lists)
+    counts: Dict[int, int] = {}
+    have = 0
+    left = 0
+    best: Optional[int] = None
+    for right, (pos_r, term_r) in enumerate(events):
+        counts[term_r] = counts.get(term_r, 0) + 1
+        if counts[term_r] == 1:
+            have += 1
+        while have == need:
+            span = pos_r - events[left][0]
+            if best is None or span < best:
+                best = span
+            _, term_l = events[left]
+            counts[term_l] -= 1
+            if counts[term_l] == 0:
+                have -= 1
+            left += 1
+    return best
+
+
+def _proximity_boost(doc_id: str, unique_terms: set) -> float:
+    """0.0 if fewer than 2 matched terms have positions for this doc
+    (nothing to measure a span over). Otherwise, more matched terms and
+    a tighter span both increase the boost."""
+    if not _INDEX.positions:
+        return 0.0
+    term_lists = []
+    for t in unique_terms:
+        doc_positions = _INDEX.positions.get(t)
+        if doc_positions:
+            plist = doc_positions.get(doc_id)
+            if plist:
+                term_lists.append(plist)
+    if len(term_lists) < 2:
+        return 0.0
+    span = _min_span(term_lists)
+    if span is None:
+        return 0.0
+    return len(term_lists) / (1.0 + span)
+
 
 def score(query: str, k: int) -> List[Tuple[str, float]]:
     if _INDEX is None or _TOKENIZER is None:
@@ -281,5 +336,14 @@ def score(query: str, k: int) -> List[Tuple[str, float]]:
         if total > 0:
             for doc_id in scores:
                 scores[doc_id] *= (1.0 + TITLE_BOOST_WEIGHT * (matched.get(doc_id, 0.0) / total))
+
+    if PROXIMITY_WEIGHT > 0 and _INDEX.positions:
+        pool_size = max(PROXIMITY_POOL, k)
+        pool = heapq.nsmallest(pool_size, scores.items(), key=lambda item: (-item[1], item[0]))
+        boosts = {doc_id: _proximity_boost(doc_id, unique_terms) for doc_id, _ in pool}
+        max_boost = max(boosts.values(), default=0.0)
+        if max_boost > 0:
+            for doc_id, raw_boost in boosts.items():
+                scores[doc_id] *= (1.0 + PROXIMITY_WEIGHT * (raw_boost / max_boost))
 
     return heapq.nsmallest(k, scores.items(), key=lambda item: (-item[1], item[0]))
