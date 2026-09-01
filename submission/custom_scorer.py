@@ -333,6 +333,29 @@ def _proximity_boost(doc_id: str, unique_terms: set) -> float:
         return 0.0
     return len(term_lists) / (1.0 + span)
 
+def _boost_matches(candidate_ids, unique_terms: set,
+                    weight_fns: Dict[str, Callable[[str], float]],
+                    postings_fns: Dict[str, Callable[[str], Optional[Dict[str, int]]]]
+                    ) -> Dict[str, Tuple[Dict[str, float], float]]:
+    """One pass over query terms computing every active multiplicative
+    boost's matched-weight/total simultaneously (was N separate
+    _match_fraction passes, one per active boost)."""
+    totals = {name: 0.0 for name in weight_fns}
+    matched = {name: dict.fromkeys(candidate_ids, 0.0) for name in weight_fns}
+    for term in unique_terms:
+        for name, weight_fn in weight_fns.items():
+            w = weight_fn(term)
+            if w <= 0:
+                continue
+            totals[name] += w
+            postings = postings_fns[name](term)
+            if not postings:
+                continue
+            m = matched[name]
+            for doc_id in postings:
+                if doc_id in m:
+                    m[doc_id] += w
+    return {name: (matched[name], totals[name]) for name in weight_fns}
 
 def score(query: str, k: int) -> List[Tuple[str, float]]:
     if _INDEX is None or _TOKENIZER is None:
@@ -367,27 +390,35 @@ def score(query: str, k: int) -> List[Tuple[str, float]]:
 
     scores = dict(fused)
 
+    weight_fns: Dict[str, Callable[[str], float]] = {}
+    postings_fns: Dict[str, Callable[[str], Optional[Dict[str, int]]]] = {}
     if COVERAGE_WEIGHT > 0:
-        matched, total = _match_fraction(scores.keys(), unique_terms, _term_idf, _INDEX.postings.get)
-        if total > 0:
-            for doc_id in scores:
-                scores[doc_id] *= (1.0 + COVERAGE_WEIGHT * (matched.get(doc_id, 0.0) / total))
-
+        weight_fns["coverage"] = _term_idf
+        postings_fns["coverage"] = _INDEX.postings.get
     if CAPITALIZATION_WEIGHT > 0 and _INDEX.cap_score:
-        matched, total = _match_fraction(
-            scores.keys(), unique_terms,
-            lambda t: _term_idf(t) * _INDEX.cap_score.get(t, 0.0),
-            _INDEX.postings.get,
-        )
-        if total > 0:
-            for doc_id in scores:
-                scores[doc_id] *= (1.0 + CAPITALIZATION_WEIGHT * (matched.get(doc_id, 0.0) / total))
-
+        weight_fns["cap"] = lambda t: _term_idf(t) * _INDEX.cap_score.get(t, 0.0)
+        postings_fns["cap"] = _INDEX.postings.get
     if TITLE_BOOST_WEIGHT > 0 and _INDEX.title_postings:
-        matched, total = _match_fraction(scores.keys(), unique_terms, _term_idf, _INDEX.title_postings.get)
-        if total > 0:
-            for doc_id in scores:
-                scores[doc_id] *= (1.0 + TITLE_BOOST_WEIGHT * (matched.get(doc_id, 0.0) / total))
+        weight_fns["title"] = _term_idf
+        postings_fns["title"] = _INDEX.title_postings.get
+
+    if weight_fns:
+        results = _boost_matches(scores.keys(), unique_terms, weight_fns, postings_fns)
+        if "coverage" in results:
+            matched, total = results["coverage"]
+            if total > 0:
+                for doc_id in scores:
+                    scores[doc_id] *= (1.0 + COVERAGE_WEIGHT * (matched.get(doc_id, 0.0) / total))
+        if "cap" in results:
+            matched, total = results["cap"]
+            if total > 0:
+                for doc_id in scores:
+                    scores[doc_id] *= (1.0 + CAPITALIZATION_WEIGHT * (matched.get(doc_id, 0.0) / total))
+        if "title" in results:
+            matched, total = results["title"]
+            if total > 0:
+                for doc_id in scores:
+                    scores[doc_id] *= (1.0 + TITLE_BOOST_WEIGHT * (matched.get(doc_id, 0.0) / total))
 
     if PROXIMITY_WEIGHT > 0 and _INDEX.positions:
         pool_size = max(PROXIMITY_POOL, k)
