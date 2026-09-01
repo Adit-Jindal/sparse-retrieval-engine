@@ -137,12 +137,12 @@ def extract_metrics(report: dict[str, Any]) -> dict[str, Any]:
             "index_size",
         ),
         "mean_query_latency_ms": (
-            "mean_query_latency_ms",
+            "mean_query_latency_seconds",
             "mean query latency",
             "mean_latency_ms",
         ),
         "max_query_latency_ms": (
-            "max_query_latency_ms",
+            "max_query_latency_seconds",
             "max query latency",
             "max_latency_ms",
         ),

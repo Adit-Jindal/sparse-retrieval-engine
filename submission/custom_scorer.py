@@ -86,6 +86,7 @@ PROXIMITY_POOL = int(os.environ.get("CUSTOM_SCORER_PROXIMITY_POOL", 50))
 _INDEX: Optional[InvertedIndex] = None
 _TOKENIZER: Optional[Tokenizer] = None
 _FORWARD_INDEX: Optional[Dict[str, Dict[str, int]]] = None
+_IDF: Dict[str, float] = {} 
 
 
 def _build_forward_index(index: InvertedIndex) -> Dict[str, Dict[str, int]]:
@@ -97,18 +98,40 @@ def _build_forward_index(index: InvertedIndex) -> Dict[str, Dict[str, int]]:
 
 
 def build(index: InvertedIndex, tokenizer: Tokenizer) -> None:
-    global _INDEX, _TOKENIZER, _FORWARD_INDEX
+    global _INDEX, _TOKENIZER, _FORWARD_INDEX, _IDF
     _INDEX = index
     _TOKENIZER = tokenizer
     _FORWARD_INDEX = _build_forward_index(index) if USE_PRF else None
+    _IDF = {
+        term: math.log(((index.N - len(postings) + 0.5) / (len(postings) + 0.5)) + 1.0)
+        for term, postings in index.postings.items()
+    }
 
 
 def _term_idf(term: str) -> float:
-    df = _INDEX.document_frequency(term)
-    return math.log(((_INDEX.N - df + 0.5) / (df + 0.5)) + 1.0)
+    return _IDF.get(term, 0.0)
 
 
-def _weighted_bm25_scores(term_weights: Dict[str, float]) -> Dict[str, float]:
+# def _weighted_bm25_scores(term_weights: Dict[str, float]) -> Dict[str, float]:
+#     avgdl = _INDEX.avg_doc_len
+#     if avgdl <= 0 or not term_weights:
+#         return {}
+#     scores: Dict[str, float] = {}
+#     for term, weight in term_weights.items():
+#         if weight <= 0:
+#             continue
+#         postings = _INDEX.postings.get(term)
+#         if not postings:
+#             continue
+#         idf = _term_idf(term)
+#         for doc_id, tf in postings.items():
+#             doc_length = _INDEX.doc_len[doc_id]
+#             denom = tf + BM25_K1 * (1.0 - BM25_B + BM25_B * (doc_length / avgdl))
+#             scores[doc_id] = scores.get(doc_id, 0.0) + weight * (idf * tf * (BM25_K1 + 1.0)) / denom
+#     return scores
+
+def _weighted_bm25_scores(term_weights: Dict[str, float],
+                           contrib_cache: Dict[str, Dict[str, float]]) -> Dict[str, float]:   # CHANGED signature
     avgdl = _INDEX.avg_doc_len
     if avgdl <= 0 or not term_weights:
         return {}
@@ -116,14 +139,21 @@ def _weighted_bm25_scores(term_weights: Dict[str, float]) -> Dict[str, float]:
     for term, weight in term_weights.items():
         if weight <= 0:
             continue
-        postings = _INDEX.postings.get(term)
-        if not postings:
-            continue
-        idf = _term_idf(term)
-        for doc_id, tf in postings.items():
-            doc_length = _INDEX.doc_len[doc_id]
-            denom = tf + BM25_K1 * (1.0 - BM25_B + BM25_B * (doc_length / avgdl))
-            scores[doc_id] = scores.get(doc_id, 0.0) + weight * (idf * tf * (BM25_K1 + 1.0)) / denom
+        contrib = contrib_cache.get(term)                     # NEW
+        if contrib is None:                                    # NEW
+            postings = _INDEX.postings.get(term)
+            if not postings:
+                contrib_cache[term] = {}                        # NEW
+                continue
+            idf = _term_idf(term)
+            contrib = {}                                        # NEW
+            for doc_id, tf in postings.items():
+                doc_length = _INDEX.doc_len[doc_id]
+                denom = tf + BM25_K1 * (1.0 - BM25_B + BM25_B * (doc_length / avgdl))
+                contrib[doc_id] = (idf * tf * (BM25_K1 + 1.0)) / denom   # CHANGED — cached, weight applied below
+            contrib_cache[term] = contrib                        # NEW
+        for doc_id, c in contrib.items():                        # CHANGED loop
+            scores[doc_id] = scores.get(doc_id, 0.0) + weight * c
     return scores
 
 
@@ -166,7 +196,26 @@ def _expansion_term_weights(seed_docs_with_scores: List[Tuple[str, float]]) -> D
     return {t: w / total for t, w in top_terms}
 
 
-def _prf_rescore(unique_terms: set, bm25_ranked: List[Tuple[str, float]], depth: int) -> List[Tuple[str, float]]:
+# def _prf_rescore(unique_terms: set, bm25_ranked: List[Tuple[str, float]], depth: int) -> List[Tuple[str, float]]:
+#     seed_docs = bm25_ranked[:PRF_TOP_DOCS]
+#     expansion_weights = _expansion_term_weights(seed_docs)
+
+#     alpha = PRF_ALPHA_SHORT if len(unique_terms) <= SHORT_QUERY_MAX_TERMS else PRF_ALPHA
+
+#     n_orig = len(unique_terms) or 1
+#     orig_weights = {t: 1.0 / n_orig for t in unique_terms}
+
+#     combined_terms = set(orig_weights) | set(expansion_weights)
+#     combined_weights = {
+#         t: alpha * orig_weights.get(t, 0.0) + (1.0 - alpha) * expansion_weights.get(t, 0.0)
+#         for t in combined_terms
+#     }
+
+#     prf_scores = _weighted_bm25_scores(combined_weights)
+#     return heapq.nsmallest(depth, prf_scores.items(), key=lambda item: (-item[1], item[0]))
+
+def _prf_rescore(unique_terms: set, bm25_ranked: List[Tuple[str, float]], depth: int,
+                  contrib_cache: Dict[str, Dict[str, float]]) -> List[Tuple[str, float]]:   # CHANGED signature
     seed_docs = bm25_ranked[:PRF_TOP_DOCS]
     expansion_weights = _expansion_term_weights(seed_docs)
 
@@ -181,7 +230,7 @@ def _prf_rescore(unique_terms: set, bm25_ranked: List[Tuple[str, float]], depth:
         for t in combined_terms
     }
 
-    prf_scores = _weighted_bm25_scores(combined_weights)
+    prf_scores = _weighted_bm25_scores(combined_weights, contrib_cache)   # CHANGED — passes cache through
     return heapq.nsmallest(depth, prf_scores.items(), key=lambda item: (-item[1], item[0]))
 
 
@@ -297,7 +346,10 @@ def score(query: str, k: int) -> List[Tuple[str, float]]:
         return []
 
     depth = max(DEPTH, k)
-    bm25_ranked = bm25.score(query, depth, k1=BM25_K1, b=BM25_B)
+    contrib_cache: Dict[str, Dict[str, float]] = {}                       # NEW — scoped per query call
+
+    bm25_full = _weighted_bm25_scores({t: 1.0 for t in unique_terms}, contrib_cache)   # CHANGED — was bm25.score(query, depth, ...)
+    bm25_ranked = heapq.nsmallest(depth, bm25_full.items(), key=lambda item: (-item[1], item[0]))
 
     lists_with_weights: List[Tuple[List[Tuple[str, float]], float]] = [(bm25_ranked, BM25_WEIGHT)]
 
@@ -306,7 +358,7 @@ def score(query: str, k: int) -> List[Tuple[str, float]]:
         lists_with_weights.append((vsm_ranked, VSM_WEIGHT))
 
     if USE_PRF and bm25_ranked:
-        prf_ranked = _prf_rescore(unique_terms, bm25_ranked, depth)
+        prf_ranked = _prf_rescore(unique_terms, bm25_ranked, depth, contrib_cache)   # CHANGED — passes cache through
         lists_with_weights.append((prf_ranked, PRF_WEIGHT))
 
     fused = _fuse_linear(lists_with_weights) if FUSION_MODE == "linear" else _fuse_rrf(lists_with_weights)
