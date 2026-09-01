@@ -66,6 +66,15 @@ FROZEN_BASE: dict = {
     "CUSTOM_SCORER_PRF_WEIGHT": "1.0",
     "CUSTOM_SCORER_RRF_K": "60",
     "CUSTOM_SCORER_BM25_WEIGHT": "0.65",
+    # --- previously implicit / ambiguous, now explicit ---
+    "INDEXER_USE_CORPUS_STOPWORDS": "1",          # or "0" — confirm which your 0.70 config used
+    "INDEXER_CORPUS_STOPWORD_DF_RATIO": "0.9",
+    "INDEXER_USE_CAPITALIZATION": "1",
+    "CUSTOM_SCORER_CAPITALIZATION_WEIGHT": "0.5", # confirm exact winning value
+    "INDEXER_USE_PSEUDO_TITLE": "1",
+    "CUSTOM_SCORER_TITLE_BOOST_WEIGHT": "0.5",    # confirm exact winning value
+    "CUSTOM_SCORER_PRF_WEIGHT_SEEDS_BY_SCORE": "0",  # or "1" — confirm which was actually validated as better
+    "CUSTOM_SCORER_PRF_ALPHA_SHORT": "0.5",          # "0.5" = true no-op (matches PRF_ALPHA); set to "0.7" only if that's confirmed as a real win, not the mislabeled-off artifact
 }
 
 STAGES: dict = {
