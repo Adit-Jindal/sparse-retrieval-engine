@@ -67,14 +67,14 @@ FROZEN_BASE: dict = {
     "CUSTOM_SCORER_RRF_K": "60",
     "CUSTOM_SCORER_BM25_WEIGHT": "0.65",
     # --- previously implicit / ambiguous, now explicit ---
-    "INDEXER_USE_CORPUS_STOPWORDS": "1",          # or "0" — confirm which your 0.70 config used
-    "INDEXER_CORPUS_STOPWORD_DF_RATIO": "0.9",
-    "INDEXER_USE_CAPITALIZATION": "1",
+    "INDEXER_USE_CORPUS_STOPWORDS": "0",          # or "0" — confirm which your 0.70 config used
+    "INDEXER_CORPUS_STOPWORD_DF_RATIO": "0.85",
+    "INDEXER_USE_CAPITALIZATION": "0",
     "CUSTOM_SCORER_CAPITALIZATION_WEIGHT": "0.5", # confirm exact winning value
     "INDEXER_USE_PSEUDO_GIST": "1",
     "CUSTOM_SCORER_GIST_BOOST_WEIGHT": "0.5",    # confirm exact winning value
-    "CUSTOM_SCORER_PRF_WEIGHT_SEEDS_BY_SCORE": "0",  # or "1" — confirm which was actually validated as better
-    "CUSTOM_SCORER_PRF_ALPHA_SHORT": "0.5",          # "0.5" = true no-op (matches PRF_ALPHA); set to "0.7" only if that's confirmed as a real win, not the mislabeled-off artifact
+    "CUSTOM_SCORER_PRF_WEIGHT_SEEDS_BY_SCORE": "1",  # or "1" — confirm which was actually validated as better
+    "CUSTOM_SCORER_PRF_ALPHA_SHORT": "0.7",          # "0.5" = true no-op (matches PRF_ALPHA); set to "0.7" only if that's confirmed as a real win, not the mislabeled-off artifact
 }
 
 STAGES: dict = {
@@ -88,7 +88,7 @@ STAGES: dict = {
     # behave differently from rank-reciprocal sums) — treat a linear win
     # as "worth a follow-up stage", not an immediate final answer.
     "fusion_mode": [
-        ("rrf", {}),  # == current frozen default
+        ("rrf", {"CUSTOM_SCORER_FUSION_MODE": "rrf"}),  # == current frozen default
         ("linear", {"CUSTOM_SCORER_FUSION_MODE": "linear"}),
     ],
 
@@ -115,15 +115,135 @@ STAGES: dict = {
     # — needed for a fair RRF-at-its-best vs linear-at-its-best
     # comparison, since linear has never had its own weight tuning.
     "linear_weights": [
-        ("base", {"CUSTOM_SCORER_FUSION_MODE": "linear"}),
-        ("bm25w_0.5", {"CUSTOM_SCORER_FUSION_MODE": "linear", "CUSTOM_SCORER_BM25_WEIGHT": "0.5"}),
-        ("bm25w_1.0", {"CUSTOM_SCORER_FUSION_MODE": "linear", "CUSTOM_SCORER_BM25_WEIGHT": "1.0"}),
-        ("bm25w_1.5", {"CUSTOM_SCORER_FUSION_MODE": "linear", "CUSTOM_SCORER_BM25_WEIGHT": "1.5"}),
-        ("prfw_0.5", {"CUSTOM_SCORER_FUSION_MODE": "linear", "CUSTOM_SCORER_PRF_WEIGHT": "0.5"}),
-        ("prfw_1.5", {"CUSTOM_SCORER_FUSION_MODE": "linear", "CUSTOM_SCORER_PRF_WEIGHT": "1.5"}),
+
+        ("bm25w_0.5_prfw_0.5", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "0.5",
+            "CUSTOM_SCORER_PRF_WEIGHT": "0.5",
+        }),
+        ("bm25w_0.5_prfw_0.75", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "0.5",
+            "CUSTOM_SCORER_PRF_WEIGHT": "0.75",
+        }),
+        ("bm25w_0.5_prfw_1.0", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "0.5",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.0",
+        }),
+        ("bm25w_0.5_prfw_1.25", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "0.5",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.25",
+        }),
+        ("bm25w_0.5_prfw_1.5", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "0.5",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.5",
+        }),
+
+        ("bm25w_0.75_prfw_0.5", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "0.75",
+            "CUSTOM_SCORER_PRF_WEIGHT": "0.5",
+        }),
+        ("bm25w_0.75_prfw_0.75", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "0.75",
+            "CUSTOM_SCORER_PRF_WEIGHT": "0.75",
+        }),
+        ("bm25w_0.75_prfw_1.0", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "0.75",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.0",
+        }),
+        ("bm25w_0.75_prfw_1.25", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "0.75",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.25",
+        }),
+        ("bm25w_0.75_prfw_1.5", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "0.75",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.5",
+        }),
+
         ("bm25w_1.0_prfw_0.5", {
             "CUSTOM_SCORER_FUSION_MODE": "linear",
-            "CUSTOM_SCORER_BM25_WEIGHT": "1.0", "CUSTOM_SCORER_PRF_WEIGHT": "0.5",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.0",
+            "CUSTOM_SCORER_PRF_WEIGHT": "0.5",
+        }),
+        ("bm25w_1.0_prfw_0.75", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.0",
+            "CUSTOM_SCORER_PRF_WEIGHT": "0.75",
+        }),
+        ("bm25w_1.0_prfw_1.0", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.0",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.0",
+        }),
+        ("bm25w_1.0_prfw_1.25", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.0",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.25",
+        }),
+        ("bm25w_1.0_prfw_1.5", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.0",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.5",
+        }),
+
+        ("bm25w_1.25_prfw_0.5", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.25",
+            "CUSTOM_SCORER_PRF_WEIGHT": "0.5",
+        }),
+        ("bm25w_1.25_prfw_0.75", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.25",
+            "CUSTOM_SCORER_PRF_WEIGHT": "0.75",
+        }),
+        ("bm25w_1.25_prfw_1.0", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.25",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.0",
+        }),
+        ("bm25w_1.25_prfw_1.25", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.25",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.25",
+        }),
+        ("bm25w_1.25_prfw_1.5", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.25",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.5",
+        }),
+
+        ("bm25w_1.5_prfw_0.5", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.5",
+            "CUSTOM_SCORER_PRF_WEIGHT": "0.5",
+        }),
+        ("bm25w_1.5_prfw_0.75", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.5",
+            "CUSTOM_SCORER_PRF_WEIGHT": "0.75",
+        }),
+        ("bm25w_1.5_prfw_1.0", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.5",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.0",
+        }),
+        ("bm25w_1.5_prfw_1.25", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.5",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.25",
+        }),
+        ("bm25w_1.5_prfw_1.5", {
+            "CUSTOM_SCORER_FUSION_MODE": "linear",
+            "CUSTOM_SCORER_BM25_WEIGHT": "1.5",
+            "CUSTOM_SCORER_PRF_WEIGHT": "1.5",
         }),
     ],
 
@@ -132,6 +252,11 @@ STAGES: dict = {
     "prf_seed_weighting": [
         ("off", {}),  # current default
         ("on", {"CUSTOM_SCORER_PRF_WEIGHT_SEEDS_BY_SCORE": "1"}),
+    ],
+
+    "prf_use_seed": [
+        ("off", {}),  # current default
+        ("on", {"CUSTOM_SCORER_USE_SEED_POOLING": "1"}),
     ],
 
     # Stage 1d: separate PRF_ALPHA for short queries. Sweep both the
@@ -310,6 +435,34 @@ STAGES: dict = {
         ("pooling_off_default", {"CUSTOM_SCORER_USE_SEED_POOLING": "0"}),  # must reproduce your 0.67-0.68 promoted baseline
         ("pool_on_prev_settings", {"CUSTOM_SCORER_USE_SEED_POOLING": "1", "CUSTOM_SCORER_SEED_DF_RATIO": "0.05", "CUSTOM_SCORER_RERANK_POOL_MULTIPLIER": "20"}),
     ],
+
+    "prf_sweep": [
+        (
+            f"seed_{seed:.2f}_alpha_{alpha:.1f}_maxdf_{max_df:.2f}",
+            {
+                "CUSTOM_SCORER_SEED_DF_RATIO": f"{seed:.2f}",
+                "CUSTOM_SCORER_PRF_ALPHA": f"{alpha:.1f}",
+                "CUSTOM_SCORER_PRF_MAX_DF_RATIO": f"{max_df:.2f}",
+            },
+        )
+        for seed in [0.01, 0.02, 0.03, 0.04, 0.05]
+        for alpha in [0.1, 0.3, 0.5, 0.7, 0.9]
+        for max_df in [0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
+    ],
+
+    "seed_df": [
+        ("df_ratio0.01", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.01"}),
+        ("df_ratio0.02", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.02"}),
+        ("df_ratio0.03", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.03"}),
+        ("df_ratio0.04", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.04"}),
+        ("df_ratio0.05", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.05"}),
+        ("df_ratio0.06", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.06"}),
+        ("df_ratio0.07", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.07"}),
+        ("df_ratio0.08", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.08"}),
+        ("df_ratio0.09", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.09"}),
+        ("df_ratio0.10", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.10"}),
+    ],
+
 }
 
 

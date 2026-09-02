@@ -48,7 +48,6 @@ from submission import bm25, boolean_vsm
 def _env_float(name: str, default: float) -> float:
     return float(os.environ.get(name, default))
 
-
 def _env_bool(name: str, default: bool) -> bool:
     val = os.environ.get(name)
     if val is None:
@@ -57,9 +56,8 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 # --- established / frozen ------------------------------------------------
-DEPTH = int(os.environ.get("CUSTOM_SCORER_DEPTH", 100))
 RRF_K = _env_float("CUSTOM_SCORER_RRF_K", 60)
-BM25_WEIGHT = _env_float("CUSTOM_SCORER_BM25_WEIGHT", 0.65)
+BM25_WEIGHT = _env_float("CUSTOM_SCORER_BM25_WEIGHT", 0.5)
 VSM_WEIGHT = _env_float("CUSTOM_SCORER_VSM_WEIGHT", 0.35)
 COVERAGE_WEIGHT = _env_float("CUSTOM_SCORER_COVERAGE_WEIGHT", 0.0)
 BM25_K1 = _env_float("CUSTOM_SCORER_BM25_K1", 1.6)
@@ -69,22 +67,22 @@ USE_VSM_FUSION = _env_bool("CUSTOM_SCORER_USE_VSM_FUSION", False)
 USE_PRF = _env_bool("CUSTOM_SCORER_USE_PRF", True)
 PRF_TOP_DOCS = int(os.environ.get("CUSTOM_SCORER_PRF_TOP_DOCS", 10))
 PRF_TOP_TERMS = int(os.environ.get("CUSTOM_SCORER_PRF_TOP_TERMS", 10))
-PRF_ALPHA = _env_float("CUSTOM_SCORER_PRF_ALPHA", 0.5)
-PRF_WEIGHT = _env_float("CUSTOM_SCORER_PRF_WEIGHT", 1.0)
-PRF_MAX_DF_RATIO = _env_float("CUSTOM_SCORER_PRF_MAX_DF_RATIO", 0.15)
+PRF_ALPHA = _env_float("CUSTOM_SCORER_PRF_ALPHA", 0.6)
+PRF_WEIGHT = _env_float("CUSTOM_SCORER_PRF_WEIGHT", 2)
+PRF_MAX_DF_RATIO = _env_float("CUSTOM_SCORER_PRF_MAX_DF_RATIO", 0.08)
 
 # --- new, default-off / no-op until swept --------------------------------
-FUSION_MODE = os.environ.get("CUSTOM_SCORER_FUSION_MODE", "rrf")
+FUSION_MODE = os.environ.get("CUSTOM_SCORER_FUSION_MODE", "linear")
 PRF_WEIGHT_SEEDS_BY_SCORE = _env_bool("CUSTOM_SCORER_PRF_WEIGHT_SEEDS_BY_SCORE", True)
 PRF_ALPHA_SHORT = _env_float("CUSTOM_SCORER_PRF_ALPHA_SHORT", 0.7)
-SHORT_QUERY_MAX_TERMS = int(os.environ.get("CUSTOM_SCORER_SHORT_QUERY_MAX_TERMS", 3))
+SHORT_QUERY_MAX_TERMS = int(os.environ.get("CUSTOM_SCORER_SHORT_QUERY_MAX_TERMS", 1)) ###### switching off for now
 CAPITALIZATION_WEIGHT = _env_float("CUSTOM_SCORER_CAPITALIZATION_WEIGHT", 0.5)
 GIST_BOOST_WEIGHT = _env_float("CUSTOM_SCORER_GIST_BOOST_WEIGHT", 0.5)
 PROXIMITY_WEIGHT = _env_float("CUSTOM_SCORER_PROXIMITY_WEIGHT", 0.0)
 PROXIMITY_POOL = int(os.environ.get("CUSTOM_SCORER_PROXIMITY_POOL", 50))
 RERANK_POOL_MULTIPLIER = int(os.environ.get("CUSTOM_SCORER_RERANK_POOL_MULTIPLIER", 20))
-SEED_DF_RATIO = _env_float("CUSTOM_SCORER_SEED_DF_RATIO", 0.02)   # terms in <=2% of corpus are "cheap"
-USE_SEED_POOLING = _env_bool("CUSTOM_SCORER_USE_SEED_POOLING", False)  # default OFF — full-corpus path is the trusted reference
+SEED_DF_RATIO = _env_float("CUSTOM_SCORER_SEED_DF_RATIO", 0.08)   # terms in <=2% of corpus are "cheap"
+USE_SEED_POOLING = _env_bool("CUSTOM_SCORER_USE_SEED_POOLING", True)  # default OFF — full-corpus path is the trusted reference
 
 _INDEX: Optional[InvertedIndex] = None
 _TOKENIZER: Optional[Tokenizer] = None
@@ -114,50 +112,6 @@ def build(index: InvertedIndex, tokenizer: Tokenizer) -> None:
 def _term_idf(term: str) -> float:
     return _IDF.get(term, 0.0)
 
-
-# def _weighted_bm25_scores(term_weights: Dict[str, float]) -> Dict[str, float]:
-#     avgdl = _INDEX.avg_doc_len
-#     if avgdl <= 0 or not term_weights:
-#         return {}
-#     scores: Dict[str, float] = {}
-#     for term, weight in term_weights.items():
-#         if weight <= 0:
-#             continue
-#         postings = _INDEX.postings.get(term)
-#         if not postings:
-#             continue
-#         idf = _term_idf(term)
-#         for doc_id, tf in postings.items():
-#             doc_length = _INDEX.doc_len[doc_id]
-#             denom = tf + BM25_K1 * (1.0 - BM25_B + BM25_B * (doc_length / avgdl))
-#             scores[doc_id] = scores.get(doc_id, 0.0) + weight * (idf * tf * (BM25_K1 + 1.0)) / denom
-#     return scores
-
-# def _weighted_bm25_scores(term_weights: Dict[str, float],
-#                            contrib_cache: Dict[str, Dict[str, float]]) -> Dict[str, float]:   # CHANGED signature
-#     avgdl = _INDEX.avg_doc_len
-#     if avgdl <= 0 or not term_weights:
-#         return {}
-#     scores: Dict[str, float] = {}
-#     for term, weight in term_weights.items():
-#         if weight <= 0:
-#             continue
-#         contrib = contrib_cache.get(term)                     # NEW
-#         if contrib is None:                                    # NEW
-#             postings = _INDEX.postings.get(term)
-#             if not postings:
-#                 contrib_cache[term] = {}                        # NEW
-#                 continue
-#             idf = _term_idf(term)
-#             contrib = {}                                        # NEW
-#             for doc_id, tf in postings.items():
-#                 doc_length = _INDEX.doc_len[doc_id]
-#                 denom = tf + BM25_K1 * (1.0 - BM25_B + BM25_B * (doc_length / avgdl))
-#                 contrib[doc_id] = (idf * tf * (BM25_K1 + 1.0)) / denom   # CHANGED — cached, weight applied below
-#             contrib_cache[term] = contrib                        # NEW
-#         for doc_id, c in contrib.items():                        # CHANGED loop
-#             scores[doc_id] = scores.get(doc_id, 0.0) + weight * c
-#     return scores
 
 def _weighted_bm25_scores(term_weights: Dict[str, float],
                            contrib_cache: Dict[str, Dict[str, float]]) -> Dict[str, float]:
@@ -329,124 +283,6 @@ def _expansion_term_weights(seed_docs_with_scores: List[Tuple[str, float]]) -> D
     total = sum(w for _, w in top_terms) or 1.0
     return {t: w / total for t, w in top_terms}
 
-
-# def _prf_rescore(unique_terms: set, bm25_ranked: List[Tuple[str, float]], depth: int) -> List[Tuple[str, float]]:
-#     seed_docs = bm25_ranked[:PRF_TOP_DOCS]
-#     expansion_weights = _expansion_term_weights(seed_docs)
-
-#     alpha = PRF_ALPHA_SHORT if len(unique_terms) <= SHORT_QUERY_MAX_TERMS else PRF_ALPHA
-
-#     n_orig = len(unique_terms) or 1
-#     orig_weights = {t: 1.0 / n_orig for t in unique_terms}
-
-#     combined_terms = set(orig_weights) | set(expansion_weights)
-#     combined_weights = {
-#         t: alpha * orig_weights.get(t, 0.0) + (1.0 - alpha) * expansion_weights.get(t, 0.0)
-#         for t in combined_terms
-#     }
-
-#     prf_scores = _weighted_bm25_scores(combined_weights)
-#     return heapq.nsmallest(depth, prf_scores.items(), key=lambda item: (-item[1], item[0]))
-
-def _prf_rescore(unique_terms: set, seed_docs: List[Tuple[str, float]], pool_ids: List[str],
-                  contrib_cache: Dict[str, Dict[str, float]]) -> Dict[str, float]:
-    expansion_weights = _expansion_term_weights(seed_docs)
-
-    alpha = PRF_ALPHA_SHORT if len(unique_terms) <= SHORT_QUERY_MAX_TERMS else PRF_ALPHA
-    n_orig = len(unique_terms) or 1
-    orig_weights = {t: 1.0 / n_orig for t in unique_terms}
-
-    combined_terms = set(orig_weights) | set(expansion_weights)
-    combined_weights = {
-        t: alpha * orig_weights.get(t, 0.0) + (1.0 - alpha) * expansion_weights.get(t, 0.0)
-        for t in combined_terms
-    }
-    return _scores_within_pool(combined_weights, pool_ids, contrib_cache)
-
-
-# def _split_seed_expensive(term_weights: Dict[str, float]) -> Tuple[Dict[str, float], Dict[str, float]]:
-#     """Rare terms (small postings, cheap to walk fully) vs common terms
-#     (large postings, expensive) — the split that lets the pool-building
-#     step stay cheap regardless of how common a query term is."""
-#     seed, expensive = {}, {}
-#     for t, w in term_weights.items():
-#         if w <= 0:
-#             continue
-#         df = _INDEX.document_frequency(t)
-#         if df == 0:
-#             continue
-#         (seed if (df / _INDEX.N) <= SEED_DF_RATIO else expensive)[t] = w
-#     if not seed and expensive:
-#         # No rare terms at all (e.g. a query of only common words) — bootstrap
-#         # the pool from the single least-common "expensive" term so we still
-#         # have somewhere to seed candidates from, rather than an empty pool.
-#         rarest = min(expensive, key=lambda t: _INDEX.document_frequency(t))
-#         seed[rarest] = expensive.pop(rarest)
-#     return seed, expensive
-
-
-# def _seed_scores(seed_weights: Dict[str, float],
-#                   contrib_cache: Dict[str, Dict[str, float]]) -> Dict[str, float]:
-#     """Full postings walk — only for rare terms, so this stays cheap by
-#     construction. Populates contrib_cache so pool-restricted scoring
-#     below can reuse it for free."""
-#     avgdl = _INDEX.avg_doc_len
-#     scores: Dict[str, float] = {}
-#     if avgdl <= 0:
-#         return scores
-#     for term, weight in seed_weights.items():
-#         contrib = contrib_cache.get(term)
-#         if contrib is None:
-#             postings = _INDEX.postings.get(term)
-#             if not postings:
-#                 contrib_cache[term] = {}
-#                 continue
-#             idf = _term_idf(term)
-#             contrib = {}
-#             for doc_id, tf in postings.items():
-#                 doc_length = _INDEX.doc_len[doc_id]
-#                 denom = tf + BM25_K1 * (1.0 - BM25_B + BM25_B * (doc_length / avgdl))
-#                 contrib[doc_id] = (idf * tf * (BM25_K1 + 1.0)) / denom
-#             contrib_cache[term] = contrib
-#         for doc_id, c in contrib.items():
-#             scores[doc_id] = scores.get(doc_id, 0.0) + weight * c
-#     return scores
-
-
-# def _scores_within_pool(term_weights: Dict[str, float], pool_ids: List[str],
-    #                      contrib_cache: Dict[str, Dict[str, float]]) -> Dict[str, float]:
-    # """Scores ANY term set (seed, expensive, or PRF expansion terms)
-    # restricted to pool_ids — cost is O(pool_size * num_terms) dict
-    # lookups, never a full postings walk. Reuses contrib_cache for terms
-    # already fully walked (free), does direct pool-restricted lookups
-    # for everything else."""
-    # avgdl = _INDEX.avg_doc_len
-    # scores: Dict[str, float] = {}
-    # if avgdl <= 0:
-    #     return scores
-    # for term, weight in term_weights.items():
-    #     if weight <= 0:
-    #         continue
-    #     contrib = contrib_cache.get(term)
-    #     if contrib is not None:
-    #         for doc_id in pool_ids:
-    #             c = contrib.get(doc_id)
-    #             if c is not None:
-    #                 scores[doc_id] = scores.get(doc_id, 0.0) + weight * c
-    #         continue
-    #     postings = _INDEX.postings.get(term)
-    #     if not postings:
-    #         continue
-    #     idf = _term_idf(term)
-    #     for doc_id in pool_ids:
-    #         tf = postings.get(doc_id)
-    #         if tf is None:
-    #             continue
-    #         doc_length = _INDEX.doc_len[doc_id]
-    #         denom = tf + BM25_K1 * (1.0 - BM25_B + BM25_B * (doc_length / avgdl))
-    #         scores[doc_id] = scores.get(doc_id, 0.0) + weight * (idf * tf * (BM25_K1 + 1.0)) / denom
-    # return scores
-
 def _fuse_rrf(lists_with_weights: List[Tuple[List[Tuple[str, float]], float]]) -> Dict[str, float]:
     fused: Dict[str, float] = {}
     for ranked, weight in lists_with_weights:
@@ -469,29 +305,6 @@ def _fuse_linear(lists_with_weights: List[Tuple[List[Tuple[str, float]], float]]
         for doc_id, s in ranked:
             fused[doc_id] = fused.get(doc_id, 0.0) + weight * ((s - lo) / span)
     return fused
-
-
-def _match_fraction(candidate_ids, unique_terms: set, weight_fn: Callable[[str], float],
-                     postings_fn: Callable[[str], Optional[Dict[str, int]]]) -> Tuple[Dict[str, float], float]:
-    """Generic helper: for each query term, look up its weight and its
-    (possibly restricted) postings, and accumulate per-candidate matched
-    weight. Used for coverage, capitalization, and title boosts — same
-    shape, different weight_fn/postings_fn."""
-    weights = {t: weight_fn(t) for t in unique_terms}
-    total = sum(w for w in weights.values() if w > 0)
-    if total <= 0:
-        return {}, 0.0
-    matched: Dict[str, float] = dict.fromkeys(candidate_ids, 0.0)
-    for term, w in weights.items():
-        if w <= 0:
-            continue
-        postings = postings_fn(term)
-        if not postings:
-            continue
-        for doc_id in postings:
-            if doc_id in matched:
-                matched[doc_id] += w
-    return matched, total
 
 def _min_span(term_position_lists: List[List[int]]) -> Optional[int]:
     """Smallest window (inclusive) containing at least one position from
@@ -524,7 +337,6 @@ def _min_span(term_position_lists: List[List[int]]) -> Optional[int]:
                 have -= 1
             left += 1
     return best
-
 
 def _proximity_boost(doc_id: str, unique_terms: set) -> float:
     """0.0 if fewer than 2 matched terms have positions for this doc
@@ -589,7 +401,7 @@ def score(query: str, k: int) -> List[Tuple[str, float]]:
     if USE_SEED_POOLING:
         seed_weights, expensive_weights = _split_seed_expensive({t: 1.0 for t in unique_terms})
         partial_scores = _seed_scores(seed_weights, contrib_cache)
-        pool_target = max(RERANK_POOL_MULTIPLIER * k, k)
+        pool_target = RERANK_POOL_MULTIPLIER * k
         pool_ids = [doc_id for doc_id, _ in
                     heapq.nsmallest(pool_target, partial_scores.items(), key=lambda item: (-item[1], item[0]))]
 
@@ -598,7 +410,7 @@ def score(query: str, k: int) -> List[Tuple[str, float]]:
         bm25_ranked = heapq.nsmallest(pool_target, bm25_full.items(), key=lambda item: (-item[1], item[0]))
         depth = pool_target
     else:
-        depth = max(DEPTH, k)
+        depth = k
         bm25_full = _weighted_bm25_scores({t: 1.0 for t in unique_terms}, contrib_cache)
         bm25_ranked = heapq.nsmallest(depth, bm25_full.items(), key=lambda item: (-item[1], item[0]))
 
@@ -608,7 +420,7 @@ def score(query: str, k: int) -> List[Tuple[str, float]]:
         vsm_ranked = boolean_vsm.vsm_score(query, depth)
         lists_with_weights.append((vsm_ranked, VSM_WEIGHT))
 
-    if USE_PRF and bm25_ranked:
+    if USE_PRF:
         if USE_SEED_POOLING:
             prf_scores = _prf_rescore_pooled(unique_terms, bm25_ranked[:PRF_TOP_DOCS], pool_ids, contrib_cache)
             prf_ranked = heapq.nsmallest(depth, prf_scores.items(), key=lambda item: (-item[1], item[0]))

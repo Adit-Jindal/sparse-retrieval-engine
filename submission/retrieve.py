@@ -68,19 +68,10 @@ def load_index(index_dir: str) -> None:
         preserve_compounds=config.get("preserve_compounds", False),
         use_bigrams=config.get("use_bigrams", False),
     )
-    bm25.build(_INDEX, _TOKENIZER)
-    boolean_vsm.build(_INDEX, _TOKENIZER)
     custom_scorer.build(_INDEX, _TOKENIZER)
 
 
 def retrieve(query: str, k: int = 10) -> List[Tuple[str, float]]:
     if _INDEX is None or _TOKENIZER is None:
         raise RuntimeError("retrieve() called before load_index().")
-    try:
-        return custom_scorer.score(query, k)
-    except Exception:
-        # Defensive fallback: run_harness.py aborts the ENTIRE query
-        # phase on any uncaught exception from retrieve(). Plain BM25,
-        # unconditionally trusted, is the floor.
-        return bm25.score(query, k, k1=custom_scorer.BM25_K1, b=custom_scorer.BM25_B)
-        # return boolean_vsm.vsm_score(query, k)
+    return custom_scorer.score(query, k)

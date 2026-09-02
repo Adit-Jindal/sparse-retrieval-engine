@@ -123,12 +123,6 @@ class Tokenizer:
 
         return tokens + extra
 
-    def extract_pseudo_title_terms(self, text: str, max_tokens: int = 12) -> List[str]:
-        """First sentence of the document, tokenized the same way as the
-        body — used only when use_pseudo_title is enabled."""
-        first_sentence = _SENT_END_RE.split(text, maxsplit=1)[0]
-        return self.tokenize(first_sentence)[:max_tokens]
-
 def _capitalization_stats(text: str) -> Dict[str, Tuple[int, int]]:
     """{lowercased_word: (non_sentence_initial_cap_count, total_count)}
     for one document. Sentence-initial occurrences are excluded from the
@@ -157,7 +151,6 @@ def encode_varint(n: int, out: bytearray) -> None:
             out.append(b)
             return
 
-
 def decode_varint_stream(data: bytes) -> List[int]:
     ints = []
     i = 0
@@ -174,9 +167,7 @@ def decode_varint_stream(data: bytes) -> List[int]:
         ints.append(n)
     return ints
 
-
 _DOC_ID_SUFFIX_RE = re.compile(r"^(.*?)(\d+)$")
-
 
 def _try_compact_doc_id_codec(doc_ids: List[str]) -> Optional[Tuple[str, int, List[int]]]:
     """If every doc_id is (constant prefix) + (fixed-width zero-padded
@@ -203,6 +194,7 @@ def _try_compact_doc_id_codec(doc_ids: List[str]) -> Optional[Tuple[str, int, Li
         if f"{prefix}{n:0{width}d}" != d:
             return None
     return prefix, width, numbers
+
 
 
 class InvertedIndex:
@@ -260,7 +252,7 @@ class InvertedIndex:
         self.tokenizer_config["use_document_gist"] = use_document_gist
         self.tokenizer_config["gist_top_k"] = gist_top_k
         self.tokenizer_config["use_positions"] = use_positions
-        self.tokenizer_config["gist_lead_boost_weight"] = gist_lead_boost_weight   # NEW
+        self.tokenizer_config["gist_lead_boost_weight"] = gist_lead_boost_weight
         self.tokenizer_config["gist_lead_decay_frac"] = gist_lead_decay_frac
         if use_positions:
             self.positions = temp_positions
@@ -465,10 +457,6 @@ class InvertedIndex:
         index.postings = cls._decode_postings(data["terms"], data["postings_blob"], data["offsets_blob"], int_to_doc_id)
 
         index.cap_score = data.get("cap_score", {})
-        # if "title_terms" in data:
-        #     index.title_postings = cls._decode_postings(
-        #         data["title_terms"], data["title_postings_blob"], data["title_offsets_blob"], int_to_doc_id
-        #     )
         if "position_terms" in data:
             index.positions = cls._decode_positions(
                 data["position_terms"], data["position_blob"], data["position_offsets"], int_to_doc_id
