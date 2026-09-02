@@ -38,6 +38,7 @@ import os
 import pickle
 import re
 import gzip
+import math
 from functools import lru_cache
 from typing import Dict, List, Tuple, Any, Optional
 
@@ -128,7 +129,6 @@ class Tokenizer:
         first_sentence = _SENT_END_RE.split(text, maxsplit=1)[0]
         return self.tokenize(first_sentence)[:max_tokens]
 
-
 def _capitalization_stats(text: str) -> Dict[str, Tuple[int, int]]:
     """{lowercased_word: (non_sentence_initial_cap_count, total_count)}
     for one document. Sentence-initial occurrences are excluded from the
@@ -213,30 +213,37 @@ class InvertedIndex:
         self.avg_doc_len: float = 0.0
         self.tokenizer_config: Dict[str, Any] = {}
         self.cap_score: Dict[str, float] = {}          # term -> proper-noun-ish score in [0,1]
-        self.title_postings: Dict[str, Dict[str, int]] = {}  # term -> {doc_id: 1}, presence only
+        self.gist_postings: Dict[str, Dict[str, int]] = {}  # term -> {doc_id: 1}, presence only
         self.positions: Dict[str, Dict[str, List[int]]] = {}  # term -> {doc_id: [token_idx, ...]}
 
-    def build(self, corpus: List[Tuple[str, str]], tokenizer: Tokenizer,
-              use_corpus_stopwords: bool = False, corpus_stopword_df_ratio: float = 0.85,
-              use_capitalization: bool = False, use_pseudo_title: bool = False,
-              use_positions: bool = False) -> None:
-        temp_positions: Dict[str, Dict[str, List[int]]] = {}
+    def build(self, corpus, tokenizer, use_corpus_stopwords=False, corpus_stopword_df_ratio=0.85,
+              use_capitalization=False, use_document_gist=False, gist_top_k=15,
+              gist_lead_boost_weight=0.0, gist_lead_decay_frac=0.1, use_positions=False) -> None:
+        temp_positions = {}
         self.tokenizer_config = dict(tokenizer.config)
         self.doc_len = {}
-        temp_postings: Dict[str, Dict[str, int]] = {}
-        cap_raw: Dict[str, Tuple[int, int]] = {}
-        title_postings: Dict[str, Dict[str, int]] = {}
+        temp_postings = {}
+        cap_raw = {}
+        doc_term_counts: Dict[str, Dict[str, int]] = {}   # build-scope only, never persisted whole
+        doc_term_first_pos: Dict[str, Dict[str, int]] = {}
 
         for doc_id, text in corpus:
             tokens = tokenizer.tokenize(text)
             self.doc_len[doc_id] = len(tokens)
             term_counts: Dict[str, int] = {}
+            first_pos: Dict[str, int] = {} if use_document_gist else None
             for idx, term in enumerate(tokens):
                 term_counts[term] = term_counts.get(term, 0) + 1
+                if use_document_gist and term not in first_pos:
+                    first_pos[term] = idx
                 if use_positions:
                     temp_positions.setdefault(term, {}).setdefault(doc_id, []).append(idx)
             for term, tf in term_counts.items():
                 temp_postings.setdefault(term, {})[doc_id] = tf
+
+            if use_document_gist:
+                doc_term_counts[doc_id] = term_counts   # kept only as long as build() runs
+                doc_term_first_pos[doc_id] = first_pos
 
             if use_capitalization:
                 for word, (cap_ct, total_ct) in _capitalization_stats(text).items():
@@ -244,20 +251,18 @@ class InvertedIndex:
                     prev_cap, prev_total = cap_raw.get(stemmed, (0, 0))
                     cap_raw[stemmed] = (prev_cap + cap_ct, prev_total + total_ct)
 
-            if use_pseudo_title:
-                for term in set(tokenizer.extract_pseudo_title_terms(text)):
-                    title_postings.setdefault(term, {})[doc_id] = 1
-
         self.postings = temp_postings
         self.N = len(self.doc_len)
         self.avg_doc_len = sum(self.doc_len.values()) / self.N if self.N > 0 else 0.0
         self.tokenizer_config["use_corpus_stopwords"] = use_corpus_stopwords
         self.tokenizer_config["corpus_stopword_df_ratio"] = corpus_stopword_df_ratio
         self.tokenizer_config["use_capitalization"] = use_capitalization
-        self.tokenizer_config["use_pseudo_title"] = use_pseudo_title
+        self.tokenizer_config["use_document_gist"] = use_document_gist
+        self.tokenizer_config["gist_top_k"] = gist_top_k
         self.tokenizer_config["use_positions"] = use_positions
+        self.tokenizer_config["gist_lead_boost_weight"] = gist_lead_boost_weight   # NEW
+        self.tokenizer_config["gist_lead_decay_frac"] = gist_lead_decay_frac
         if use_positions:
-            # positions are collected in tokenize-order already sorted per doc
             self.positions = temp_positions
 
         if use_corpus_stopwords and self.N > 0:
@@ -265,9 +270,6 @@ class InvertedIndex:
                        if len(postings) / self.N > corpus_stopword_df_ratio]
             for t in to_drop:
                 del self.postings[t]
-            # forward-index / IDF lookups elsewhere already treat a
-            # missing term as "no match, contributes nothing" — no
-            # other module needs to know which terms were pruned.
 
         if use_capitalization:
             self.cap_score = {
@@ -275,8 +277,20 @@ class InvertedIndex:
                 if total_ct > 0 and t in self.postings
             }
 
-        if use_pseudo_title:
-            self.title_postings = title_postings
+        if use_document_gist and self.N > 0:
+            idf_lookup = {
+                t: math.log((self.N + 1.0) / (len(postings) + 1.0))
+                for t, postings in self.postings.items()
+            }
+            gist_postings: Dict[str, Dict[str, int]] = {}
+            for doc_id, term_counts in doc_term_counts.items():
+                terms = _select_gist_terms(
+                    term_counts, doc_term_first_pos[doc_id], self.doc_len[doc_id],
+                    idf_lookup, gist_top_k, gist_lead_boost_weight, gist_lead_decay_frac,
+                )
+                for term in terms:
+                    gist_postings.setdefault(term, {})[doc_id] = 1
+            self.gist_postings = gist_postings
 
     def document_frequency(self, term: str) -> int:
         postings = self.postings.get(term)
@@ -410,11 +424,11 @@ class InvertedIndex:
         }
         if self.cap_score:
             data["cap_score"] = self.cap_score
-        if self.title_postings:
-            t_terms, t_blob, t_offsets = self._encode_postings(self.title_postings, doc_id_to_int)
-            data["title_terms"] = t_terms
-            data["title_postings_blob"] = t_blob
-            data["title_offsets_blob"] = t_offsets
+        if self.gist_postings:
+            g_terms, g_blob, g_offsets = self._encode_postings(self.gist_postings, doc_id_to_int)
+            data["gist_terms"] = g_terms
+            data["gist_postings_blob"] = g_blob
+            data["gist_offsets_blob"] = g_offsets
         if self.positions:
             p_terms, p_blob, p_offsets = self._encode_positions(self.positions, doc_id_to_int)
             data["position_terms"] = p_terms
@@ -451,13 +465,41 @@ class InvertedIndex:
         index.postings = cls._decode_postings(data["terms"], data["postings_blob"], data["offsets_blob"], int_to_doc_id)
 
         index.cap_score = data.get("cap_score", {})
-        if "title_terms" in data:
-            index.title_postings = cls._decode_postings(
-                data["title_terms"], data["title_postings_blob"], data["title_offsets_blob"], int_to_doc_id
-            )
+        # if "title_terms" in data:
+        #     index.title_postings = cls._decode_postings(
+        #         data["title_terms"], data["title_postings_blob"], data["title_offsets_blob"], int_to_doc_id
+        #     )
         if "position_terms" in data:
             index.positions = cls._decode_positions(
                 data["position_terms"], data["position_blob"], data["position_offsets"], int_to_doc_id
             )
+        if "gist_terms" in data:
+            index.gist_postings = cls._decode_postings(
+                data["gist_terms"], data["gist_postings_blob"], data["gist_offsets_blob"], int_to_doc_id
+            )
 
         return index
+
+
+def _select_gist_terms(term_counts: Dict[str, int], first_pos: Dict[str, int], doc_len: int,
+                    idf_lookup: Dict[str, float], top_k: int,
+                    lead_boost_weight: float, lead_decay_frac: float) -> List[str]:
+    """Top-K terms by tf*idf, softly reweighted toward terms that first
+    appear early in the document (as a *fraction* of its length, not a
+    hard sentence boundary) — captures lead-sentence/structured-abstract
+    convention where it exists, without assuming it categorically.
+    lead_boost_weight=0 reduces this to pure tf*idf gist selection."""
+    scored = []
+    for term, tf in term_counts.items():
+        idf = idf_lookup.get(term)
+        if idf is None:
+            continue
+        base = tf * idf
+        if lead_boost_weight > 0 and doc_len > 0:
+            rel_pos = first_pos.get(term, doc_len) / doc_len
+            base *= (1.0 + lead_boost_weight * math.exp(-rel_pos / lead_decay_frac))
+        scored.append((term, base))
+    if not scored:
+        return []
+    scored.sort(key=lambda x: -x[1])
+    return [t for t, _ in scored[:top_k]]

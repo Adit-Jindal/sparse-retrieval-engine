@@ -32,8 +32,11 @@ def build_index(corpus_path: str, index_dir: str) -> None:
     use_corpus_stopwords = _env_bool("INDEXER_USE_CORPUS_STOPWORDS", True)
     corpus_stopword_df_ratio = float(os.environ.get("INDEXER_CORPUS_STOPWORD_DF_RATIO", 0.9))
     use_capitalization = _env_bool("INDEXER_USE_CAPITALIZATION", True)
-    use_pseudo_title = _env_bool("INDEXER_USE_PSEUDO_TITLE", True)
+    use_pseudo_gist = _env_bool("INDEXER_USE_PSEUDO_GIST", True)
     use_positions = _env_bool("INDEXER_USE_POSITIONS", False)
+    gist_top_k = _env_bool("INDEXER_GIST_TOP_K", 15)
+    gist_lead_boost_weight = float(os.environ.get("INDEXER_GIST_LEAD_BOOST_WEIGHT", 0.0))
+    gist_lead_decay_frac = float(os.environ.get("INDEXER_GIST_LEAD_DECAY_FRAC", 0.1))
 
     tokenizer = Tokenizer(
         use_stopwords=True, use_stemmer=True, stopword_set=stopword_set,
@@ -45,7 +48,10 @@ def build_index(corpus_path: str, index_dir: str) -> None:
         use_corpus_stopwords=use_corpus_stopwords,
         corpus_stopword_df_ratio=corpus_stopword_df_ratio,
         use_capitalization=use_capitalization,
-        use_pseudo_title=use_pseudo_title,
+        use_document_gist=use_pseudo_gist,
+        gist_top_k=gist_top_k,
+        gist_lead_boost_weight=gist_lead_boost_weight,
+        gist_lead_decay_frac=gist_lead_decay_frac,
         use_positions=use_positions,
     )
     index.save(index_dir)

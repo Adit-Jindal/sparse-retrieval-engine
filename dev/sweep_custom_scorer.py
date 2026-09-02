@@ -71,8 +71,8 @@ FROZEN_BASE: dict = {
     "INDEXER_CORPUS_STOPWORD_DF_RATIO": "0.9",
     "INDEXER_USE_CAPITALIZATION": "1",
     "CUSTOM_SCORER_CAPITALIZATION_WEIGHT": "0.5", # confirm exact winning value
-    "INDEXER_USE_PSEUDO_TITLE": "1",
-    "CUSTOM_SCORER_TITLE_BOOST_WEIGHT": "0.5",    # confirm exact winning value
+    "INDEXER_USE_PSEUDO_GIST": "1",
+    "CUSTOM_SCORER_GIST_BOOST_WEIGHT": "0.5",    # confirm exact winning value
     "CUSTOM_SCORER_PRF_WEIGHT_SEEDS_BY_SCORE": "0",  # or "1" — confirm which was actually validated as better
     "CUSTOM_SCORER_PRF_ALPHA_SHORT": "0.5",          # "0.5" = true no-op (matches PRF_ALPHA); set to "0.7" only if that's confirmed as a real win, not the mislabeled-off artifact
 }
@@ -276,6 +276,39 @@ STAGES: dict = {
             "CUSTOM_SCORER_PROXIMITY_WEIGHT": "0.5",
             "CUSTOM_SCORER_PROXIMITY_POOL": "50",
         }),
+    ],
+    "document_gist": [
+        ("off", {"INDEXER_USE_DOCUMENT_GIST": "0"}),
+        ("pure_gist_k15_w0.3", {
+            "INDEXER_USE_DOCUMENT_GIST": "1", "INDEXER_GIST_TOP_K": "15",
+            "CUSTOM_SCORER_GIST_BOOST_WEIGHT": "0.3",
+        }),  # lead_boost_weight defaults 0 — isolates pure tf*idf gist first
+        ("lead_k15_w0.3_lead0.5", {
+            "INDEXER_USE_DOCUMENT_GIST": "1", "INDEXER_GIST_TOP_K": "15",
+            "INDEXER_GIST_LEAD_BOOST_WEIGHT": "0.5", "INDEXER_GIST_LEAD_DECAY_FRAC": "0.1",
+            "CUSTOM_SCORER_GIST_BOOST_WEIGHT": "0.3",
+        }),
+        ("lead_k15_w0.3_lead1.0", {
+            "INDEXER_USE_DOCUMENT_GIST": "1", "INDEXER_GIST_TOP_K": "15",
+            "INDEXER_GIST_LEAD_BOOST_WEIGHT": "1.0", "INDEXER_GIST_LEAD_DECAY_FRAC": "0.1",
+            "CUSTOM_SCORER_GIST_BOOST_WEIGHT": "0.3",
+        }),
+        ("lead_k15_w0.3_lead1.0_decay0.2", {
+            "INDEXER_USE_DOCUMENT_GIST": "1", "INDEXER_GIST_TOP_K": "15",
+            "INDEXER_GIST_LEAD_BOOST_WEIGHT": "1.0", "INDEXER_GIST_LEAD_DECAY_FRAC": "0.2",
+            "CUSTOM_SCORER_GIST_BOOST_WEIGHT": "0.3",
+        }),
+    ],
+    "seed_pool_tradeoff": [
+        ("current_baseline", {}),   # whatever your promoted config's DEPTH-equivalent behavior was
+        ("seed0.01_n10", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.01", "CUSTOM_SCORER_RERANK_POOL_MULTIPLIER": "10"}),
+        ("seed0.02_n10", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.02", "CUSTOM_SCORER_RERANK_POOL_MULTIPLIER": "10"}),
+        ("seed0.02_n20", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.02", "CUSTOM_SCORER_RERANK_POOL_MULTIPLIER": "20"}),
+        ("seed0.05_n20", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.05", "CUSTOM_SCORER_RERANK_POOL_MULTIPLIER": "20"}),
+    ],
+    "seed_pool_reference_check": [
+        ("pooling_off_default", {"CUSTOM_SCORER_USE_SEED_POOLING": "0"}),  # must reproduce your 0.67-0.68 promoted baseline
+        ("pool_on_prev_settings", {"CUSTOM_SCORER_USE_SEED_POOLING": "1", "CUSTOM_SCORER_SEED_DF_RATIO": "0.05", "CUSTOM_SCORER_RERANK_POOL_MULTIPLIER": "20"}),
     ],
 }
 
