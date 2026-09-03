@@ -462,7 +462,19 @@ STAGES: dict = {
         ("df_ratio0.09", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.09"}),
         ("df_ratio0.10", {"CUSTOM_SCORER_SEED_DF_RATIO": "0.10"}),
     ],
-
+    "feature_weights": [
+        (
+            f"coverage_{coverage:.1f}_caps_{caps:.1f}_gist_{gist:.1f}",
+            {
+                "CUSTOM_SCORER_COVERAGE_WEIGHT": f"{coverage:.1f}",
+                "CUSTOM_SCORER_CAPITALIZATION_WEIGHT": f"{caps:.1f}",
+                "CUSTOM_SCORER_GIST_BOOST_WEIGHT": f"{gist:.1f}",
+            },
+        )
+        for coverage in [0.8]
+        for caps in [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        for gist in [0.4]
+    ],
 }
 
 

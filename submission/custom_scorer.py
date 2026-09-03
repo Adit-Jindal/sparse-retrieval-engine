@@ -39,6 +39,7 @@ Frozen-established defaults (from prior sweeps, unchanged):
 import heapq
 import math
 import os
+import random
 from typing import Callable, Dict, List, Optional, Tuple
 
 from submission.indexer import InvertedIndex, Tokenizer
@@ -59,7 +60,7 @@ def _env_bool(name: str, default: bool) -> bool:
 RRF_K = _env_float("CUSTOM_SCORER_RRF_K", 60)
 BM25_WEIGHT = _env_float("CUSTOM_SCORER_BM25_WEIGHT", 0.5)
 VSM_WEIGHT = _env_float("CUSTOM_SCORER_VSM_WEIGHT", 0.35)
-COVERAGE_WEIGHT = _env_float("CUSTOM_SCORER_COVERAGE_WEIGHT", 0.0)
+COVERAGE_WEIGHT = _env_float("CUSTOM_SCORER_COVERAGE_WEIGHT", 0.9)
 BM25_K1 = _env_float("CUSTOM_SCORER_BM25_K1", 1.6)
 BM25_B = _env_float("CUSTOM_SCORER_BM25_B", 0.5)
 USE_VSM_FUSION = _env_bool("CUSTOM_SCORER_USE_VSM_FUSION", False)
@@ -75,14 +76,15 @@ PRF_MAX_DF_RATIO = _env_float("CUSTOM_SCORER_PRF_MAX_DF_RATIO", 0.08)
 FUSION_MODE = os.environ.get("CUSTOM_SCORER_FUSION_MODE", "linear")
 PRF_WEIGHT_SEEDS_BY_SCORE = _env_bool("CUSTOM_SCORER_PRF_WEIGHT_SEEDS_BY_SCORE", True)
 PRF_ALPHA_SHORT = _env_float("CUSTOM_SCORER_PRF_ALPHA_SHORT", 0.7)
-SHORT_QUERY_MAX_TERMS = int(os.environ.get("CUSTOM_SCORER_SHORT_QUERY_MAX_TERMS", 1)) ###### switching off for now
+SHORT_QUERY_MAX_TERMS = int(os.environ.get("CUSTOM_SCORER_SHORT_QUERY_MAX_TERMS", 4)) ###### switching off for now
 CAPITALIZATION_WEIGHT = _env_float("CUSTOM_SCORER_CAPITALIZATION_WEIGHT", 0.5)
 GIST_BOOST_WEIGHT = _env_float("CUSTOM_SCORER_GIST_BOOST_WEIGHT", 0.5)
 PROXIMITY_WEIGHT = _env_float("CUSTOM_SCORER_PROXIMITY_WEIGHT", 0.0)
 PROXIMITY_POOL = int(os.environ.get("CUSTOM_SCORER_PROXIMITY_POOL", 50))
 RERANK_POOL_MULTIPLIER = int(os.environ.get("CUSTOM_SCORER_RERANK_POOL_MULTIPLIER", 20))
-SEED_DF_RATIO = _env_float("CUSTOM_SCORER_SEED_DF_RATIO", 0.08)   # terms in <=2% of corpus are "cheap"
+SEED_DF_RATIO = _env_float("CUSTOM_SCORER_SEED_DF_RATIO", 0.15)   # terms in <=2% of corpus are "cheap"
 USE_SEED_POOLING = _env_bool("CUSTOM_SCORER_USE_SEED_POOLING", True)  # default OFF — full-corpus path is the trusted reference
+RANDOM_SAMPLE_RATIO = _env_float("CUSTOM_SCORER_RANDOM_SAMPLE_RATIO", 0.25) # To take some expensive (common) terms to add to the set of rare terms, to improve results
 
 _INDEX: Optional[InvertedIndex] = None
 _TOKENIZER: Optional[Tokenizer] = None
@@ -400,6 +402,16 @@ def score(query: str, k: int) -> List[Tuple[str, float]]:
 
     if USE_SEED_POOLING:
         seed_weights, expensive_weights = _split_seed_expensive({t: 1.0 for t in unique_terms})
+        # --- NEW: Randomly sample half of the common (expensive) terms ---
+        expensive_keys = list(expensive_weights.keys())
+        num_to_move: int = int(RANDOM_SAMPLE_RATIO * len(expensive_keys))
+        
+        if num_to_move > 0:
+            sampled_keys = random.sample(expensive_keys, num_to_move)
+            for k_term in sampled_keys:
+                # Remove from expensive and add to seed
+                seed_weights[k_term] = expensive_weights.pop(k_term)
+        # -----------------------------------------------------------------
         partial_scores = _seed_scores(seed_weights, contrib_cache)
         pool_target = RERANK_POOL_MULTIPLIER * k
         pool_ids = [doc_id for doc_id, _ in
