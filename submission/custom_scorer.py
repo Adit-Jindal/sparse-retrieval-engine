@@ -84,7 +84,7 @@ PROXIMITY_POOL = int(os.environ.get("CUSTOM_SCORER_PROXIMITY_POOL", 50))
 RERANK_POOL_MULTIPLIER = int(os.environ.get("CUSTOM_SCORER_RERANK_POOL_MULTIPLIER", 20))
 SEED_DF_RATIO = _env_float("CUSTOM_SCORER_SEED_DF_RATIO", 0.15)   # terms in <=2% of corpus are "cheap"
 USE_SEED_POOLING = _env_bool("CUSTOM_SCORER_USE_SEED_POOLING", True)  # default OFF — full-corpus path is the trusted reference
-RANDOM_SAMPLE_RATIO = _env_float("CUSTOM_SCORER_RANDOM_SAMPLE_RATIO", 0.25) # To take some expensive (common) terms to add to the set of rare terms, to improve results
+RANDOM_SAMPLE_RATIO = _env_float("CUSTOM_SCORER_RANDOM_SAMPLE_RATIO", 0.55) # To take some expensive (common) terms to add to the set of rare terms, to improve results
 
 _INDEX: Optional[InvertedIndex] = None
 _TOKENIZER: Optional[Tokenizer] = None

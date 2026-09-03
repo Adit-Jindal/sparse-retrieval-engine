@@ -475,6 +475,32 @@ STAGES: dict = {
         for caps in [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
         for gist in [0.4]
     ],
+
+    "random_sample_ratio": [
+        ("sample_ratio_0.35", {
+            "CUSTOM_SCORER_RANDOM_SAMPLE_RATIO": "0.35",
+        }),
+        ("sample_ratio_0.40", {
+            "CUSTOM_SCORER_RANDOM_SAMPLE_RATIO": "0.40",
+        }),
+        ("sample_ratio_0.45", {
+            "CUSTOM_SCORER_RANDOM_SAMPLE_RATIO": "0.45",
+        }),
+        ("sample_ratio_0.50", {
+            "CUSTOM_SCORER_RANDOM_SAMPLE_RATIO": "0.50",
+        }),
+        ("sample_ratio_0.55", {
+            "CUSTOM_SCORER_RANDOM_SAMPLE_RATIO": "0.55",
+        }),
+        ("sample_ratio_0.60", {
+            "CUSTOM_SCORER_RANDOM_SAMPLE_RATIO": "0.60",
+        }),
+        ("sample_ratio_0.65", {
+            "CUSTOM_SCORER_RANDOM_SAMPLE_RATIO": "0.65",
+        }),
+    ],
+
+
 }
 
 
